@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Pac-Man CE DX Vita Bundler</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<header class="hero">
+  <img class="hero-bg" src="hero.png" alt="" aria-hidden="true" />
+  <div class="hero-inner">
+    <div class="titles">
+      <h1>Pac-Man CE DX Vita Bundler</h1>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section class="picker">
+    <div class="dropzone" id="apk-drop">
+      <input type="file" id="apk-input" accept=".apk,application/vnd.android.package-archive" hidden />
+      <div class="drop-label">
+        <span class="slot">APK</span>
+        <span class="hint">Drop <code>PAC-MANCEDX_*.apk</code> here or click to choose</span>
+        <span class="file-name" id="apk-name">No file selected</span>
+      </div>
+    </div>
+
+    <div class="dropzone" id="obb-drop">
+      <input type="file" id="obb-input" accept=".obb" hidden />
+      <div class="drop-label">
+        <span class="slot">OBB</span>
+        <span class="hint">Drop <code>main.*.com.bandainamcoent.pacmancedx.obb</code> here or click to choose</span>
+        <span class="file-name" id="obb-name">No file selected</span>
+      </div>
+    </div>
+  </section>
+
+  <div id="hash-warning" class="hash-warning" hidden role="alert">
+    <p>
+      The APK and/or OBB do not match the checksums this bundler was tested with.
+      The result may not work on your Vita. Try finding the matching files—for example by searching the
+      <a href="https://archive.org/">Internet Archive</a>.
+    </p>
+  </div>
+
+  <section class="actions">
+    <button id="build-btn" disabled>Build Vita installer</button>
+    <div class="progress" id="progress" hidden>
+      <div class="bar" id="bar"></div>
+      <div class="status" id="status">Starting…</div>
+    </div>
+    <div class="log" id="log" hidden></div>
+  </section>
+
+  <section class="howto">
+    <h2>How to install on your Vita</h2>
+    <p>
+      Clicking <strong>Build Vita installer</strong> produces two files:
+      a ~2 MB <code>pacmancedx.vpk</code> (loader + LiveArea) and a ~130 MB
+      <code>pacmancedx-data.zip</code> (game data). Keeping the data outside the
+      VPK avoids VitaShell installing hundreds of megabytes through the package
+      installer; you copy the loose data over the network instead.
+    </p>
+    <ol>
+      <li>On your computer, unzip <code>pacmancedx-data.zip</code>. You should get
+        one top-level folder named <code>pacmancedx/</code> with the game files inside.</li>
+      <li>On the Vita, start FTP (for example VitaShell: press <kbd>Select</kbd> for the
+        FTP server). From your PC, connect once with an FTP client and upload that entire
+        <code>pacmancedx</code> folder into <code>ux0:data/</code> so the Vita ends up with
+        <code>ux0:data/pacmancedx/…</code></li>
+      <li>Still on that connection (or over USB if you prefer), copy
+        <code>pacmancedx.vpk</code> onto the Vita as well — for example into
+        <code>ux0:data/</code>. Then in VitaShell highlight the VPK, press <kbd>Triangle</kbd> →
+        <em>Install</em>, and accept the extended permissions prompt.</li>
+      <li>Launch <strong>PAC-MAN CE DX</strong> from your LiveArea.</li>
+    </ol>
+  </section>
+
+  <footer>
+    <p>
+      Runs entirely in-browser via <a href="https://github.com/101arrowz/fflate">fflate</a>.
+    </p>
+  </footer>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/fflate@0.8.2/umd/index.js"></script>
+<script src="vendor/pako_deflate.min.js"></script>
+<script src="vendor/UPNG.js"></script>
+<script src="vendor/pgxt.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

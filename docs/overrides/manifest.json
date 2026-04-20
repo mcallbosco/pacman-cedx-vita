@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "overrides": [
+    {
+      "type": "patch",
+      "format": "vpat1",
+      "target": "data/assets/data/shader/sys_mapgen_ps.cgp",
+      "patch": "overrides/shader/sys_mapgen_ps.cgp.vpat"
+    },
+    {
+      "type": "patch",
+      "format": "vpat1",
+      "target": "data/assets/data/shader/sys_mapgen_vs.cgv",
+      "patch": "overrides/shader/sys_mapgen_vs.cgv.vpat"
+    },
+    {
+      "type": "patch",
+      "format": "vpat1",
+      "target": "data/assets/data/shader/sys_charlight_vs.cgv",
+      "patch": "overrides/shader/sys_charlight_vs.cgv.vpat"
+    },
+    {
+      "type": "add",
+      "target": "data/assets/data/tex/ghost_eye_shadow.png",
+      "source": "overrides/tex/ghost_eye_shadow.png"
+    },
+    {
+      "type": "png_cutout",
+      "target": "data/assets/data/runny/textures/menu.png",
+      "rects": [[1100, 875, 1240, 1135]]
+    },
+    {
+      "type": "derive_png",
+      "from": "data/assets/data/runny/textures/splash.png",
+      "crop": [0, 0, 1920, 1280],
+      "resize": [960, 544],
+      "target": "sce_sys/pic0.png"
+    },
+    {
+      "type": "derive_png",
+      "from": "data/assets/data/runny/textures/splash.png",
+      "crop": [0, 0, 1920, 1280],
+      "resize": [840, 500],
+      "target": "sce_sys/livearea/contents/bg0.png"
+    },
+    {
+      "type": "derive_png",
+      "from": "data/assets/data/runny/textures/splash.png",
+      "crop": [0, 1280, 745, 475],
+      "resize": [280, 158],
+      "target": "sce_sys/livearea/contents/startup.png"
+    },
+    {
+      "type": "derive_png",
+      "from": "__stage/apk/res/drawable-xxxhdpi-v4/icon.png",
+      "resize": [128, 128],
+      "no_alpha": true,
+      "target": "sce_sys/icon0.png"
+    }
+  ]
+}

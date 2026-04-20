@@ -1,0 +1,109 @@
+name: Build VPK and Deploy Pages
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  # Install under $HOME so we don't need sudo.
+  VITASDK: /home/runner/vitasdk
+  # Bump this when vitaGL or our code starts depending on a newer SDK feature
+  # (e.g. new SCE_GXM_INITIALIZE_FLAG_*) so cached SDKs get invalidated.
+  VITASDK_CACHE_KEY: vitasdk-v2.535
+  # Pinned to last-known-good autobuild. Why: autobuilds v2.536–v2.539
+  # shipped a GCC 15 / binutils upgrade that breaks vita-elf-create with
+  # "Cannot allocate N bytes for SCE data at end of segment 0; segment 1
+  # overlaps" (vitasdk/buildscripts#144). Bump when that issue is fixed.
+  VITASDK_AUTOBUILD_TAG: master-linux-v2.535
+  VITASDK_AUTOBUILD_ASSET: vitasdk-x86_64-linux-gnu-2025-07-20_13-03-36.tar.bz2
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install host build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential git curl xz-utils python3
+
+      - name: Cache VitaSDK
+        id: cache-vitasdk
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.VITASDK }}
+          key: ${{ env.VITASDK_CACHE_KEY }}
+
+      - name: Install VitaSDK (pinned autobuild + latest headers + vdpm packages)
+        if: steps.cache-vitasdk.outputs.cache-hit != 'true'
+        run: |
+          # 1) Pinned toolchain tarball as base — avoids the GCC 15/binutils
+          # break that landed in autobuilds >= v2.536.
+          rm -rf "$VITASDK"
+          mkdir -p "$VITASDK"
+          url="https://github.com/vitasdk/autobuilds/releases/download/${VITASDK_AUTOBUILD_TAG}/${VITASDK_AUTOBUILD_ASSET}"
+          curl -fsSL "$url" -o /tmp/vitasdk.tar.bz2
+          tar -xjf /tmp/vitasdk.tar.bz2 -C "$VITASDK" --strip-components=1
+          rm /tmp/vitasdk.tar.bz2
+          # 2) Overlay latest vita-headers — vitaGL needs SCE_GXM_INITIALIZE_FLAG_*
+          # values that postdate the v2.535 tarball's bundled headers. These
+          # are header-only defines, so no stub regeneration is needed.
+          git clone --depth 1 https://github.com/vitasdk/vita-headers /tmp/vita-headers
+          cp -r /tmp/vita-headers/include/. "$VITASDK/arm-vita-eabi/include/"
+          # 3) vdpm packages (vitaGL deps, etc.) layered on top.
+          git clone --depth 1 https://github.com/vitasdk/vdpm /tmp/vdpm
+          cd /tmp/vdpm
+          ./install-all.sh
+
+      - name: Add VitaSDK to PATH
+        run: echo "$VITASDK/bin" >> "$GITHUB_PATH"
+
+      - name: Configure
+        run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build -j"$(nproc)"
+
+      - name: Stage Pages site (docs/ + freshly built VPK)
+        run: |
+          mkdir -p _site
+          cp -r docs/. _site/
+          cp build/pacmancedx.vpk _site/pacmancedx.vpk
+
+      - name: Upload VPK as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pacmancedx-vpk
+          path: build/pacmancedx.vpk
+          if-no-files-found: error
+
+      - name: Upload Pages artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
