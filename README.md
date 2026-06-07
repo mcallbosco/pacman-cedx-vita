@@ -2,6 +2,8 @@
 
 ### → To install, go to **[pacmancedx.mcallbos.co](https://pacmancedx.mcallbos.co/)** ←
 
+![Screenshot](pmcedx-readme.jpg)
+
 Drop in your APK + OBB in the browser and it'll hand you back a single `pacmancedx.zip` containing the ready-to-install VPK and a `pacmancedx/` data folder. Nothing leaves your machine. This repo is the source code behind that site and the loader VPK it builds.
 
 ---
