@@ -377,6 +377,13 @@ void controls_handler_key(int32_t keycode, ControlsAction action) {
 }
 
 void controls_handler_touch(int32_t id, float x, float y, ControlsAction action) {
+    static int touch_log_count = 0;
+    if (touch_log_count < 32) {
+        l_info("[TOUCH] id=%d action=%d x=%d y=%d touchEvent=%p multiTouchEvent=%p",
+               id, action, (int)x, (int)y, touchEvent, multiTouchEvent);
+        touch_log_count++;
+    }
+
     if (touchEvent) {
         int android_action = (action == CONTROLS_ACTION_DOWN) ? 0 :
                              (action == CONTROLS_ACTION_UP) ? 1 : 2;
@@ -669,6 +676,7 @@ int main() {
     int      _prof_last_summary_frame = 0;
 #endif
     while (1) {
+        controls_poll_touch();
         process_input();
 
         /* Auto-skip intro: on Vita, the splash.runnybin animation plays for
