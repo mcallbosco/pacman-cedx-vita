@@ -100,6 +100,7 @@ static int  (*GetMenuState)(void *env, void *obj);
 static int  (*GetMenuMode)(void *env, void *obj);
 static int  (*IsGamePause)(void *env, void *obj);
 static int  (*ExitGame)(void *env, void *obj);
+static uint8_t *menu_manager_is_ingame;
 
 /*
  * PAC-MAN CE DX controller button bitmask (from PacmanCEActivity.smali)
@@ -140,8 +141,31 @@ static int  (*ExitGame)(void *env, void *obj);
 #define MFI_DPAD_UP      1062  /* 0x426 */
 #define MFI_DPAD_RIGHT   1063  /* 0x427 */
 #define MFI_DPAD_DOWN    1064  /* 0x428 */
+#define MFI_BACK         1032  /* 0x408 — Android KEYCODE_BACK path */
 #define MFI_MENU         1060  /* 0x424 — sets a flag (back/menu) */
 #define MFI_L2           1070  /* 0x42e */
+
+enum {
+    INPUT_DIR_LEFT = 0,
+    INPUT_DIR_RIGHT,
+    INPUT_DIR_UP,
+    INPUT_DIR_DOWN,
+    INPUT_DIR_COUNT
+};
+
+static const uint32_t input_dir_buttons[INPUT_DIR_COUNT] = {
+    SCE_CTRL_LEFT,
+    SCE_CTRL_RIGHT,
+    SCE_CTRL_UP,
+    SCE_CTRL_DOWN
+};
+
+static const int input_dir_mfi_ids[INPUT_DIR_COUNT] = {
+    MFI_DPAD_LEFT,
+    MFI_DPAD_RIGHT,
+    MFI_DPAD_UP,
+    MFI_DPAD_DOWN
+};
 
 static void resolve_game_symbols(void) {
     /* Use the docomotab variant - this is the Google Play version */
@@ -182,6 +206,9 @@ static void resolve_game_symbols(void) {
            initFileSystem, init, step_func, SurfaceCreated);
     l_info("  DealInputDate=%p touchEvent=%p inputMfiEvent=%p",
            DealInputDate, touchEvent, inputMfiEvent);
+
+    menu_manager_is_ingame = (uint8_t *)so_symbol(&so_mod, "_ZN6pmcedx11MenuManager11s_bIsIngameE");
+    l_info("  MenuManager::s_bIsIngame=%p", menu_manager_is_ingame);
 }
 
 /*
@@ -211,6 +238,86 @@ static void mfi_send_if_changed(uint32_t vita_btn, int mfi_id,
     inputMfiEvent(&jni, NULL, mfi_id, now);
 }
 
+static void mfi_send_mask_if_changed(uint32_t vita_mask, int mfi_id,
+                                     uint32_t cur, uint32_t prev) {
+    int now  = (cur  & vita_mask) ? 1 : 0;
+    int was  = (prev & vita_mask) ? 1 : 0;
+    if (now == was || !inputMfiEvent) return;
+    inputMfiEvent(&jni, NULL, mfi_id, now);
+}
+
+static void mfi_send_direction_changes(uint32_t cur, uint32_t prev) {
+    if (!inputMfiEvent) return;
+
+    for (int i = 0; i < INPUT_DIR_COUNT; ++i) {
+        if ((prev & input_dir_buttons[i]) && !(cur & input_dir_buttons[i]))
+            inputMfiEvent(&jni, NULL, input_dir_mfi_ids[i], 0);
+    }
+
+    for (int i = 0; i < INPUT_DIR_COUNT; ++i) {
+        if ((cur & input_dir_buttons[i]) && !(prev & input_dir_buttons[i]))
+            inputMfiEvent(&jni, NULL, input_dir_mfi_ids[i], 1);
+    }
+}
+
+static int is_ingame_menu_state(void) {
+    return menu_manager_is_ingame && *menu_manager_is_ingame;
+}
+
+static int should_allow_back_input(void) {
+    return !is_ingame_menu_state();
+}
+
+static int circle_back_sent = 0;
+
+static void mfi_send_back_if_allowed(uint32_t cur, uint32_t prev) {
+    if (!inputMfiEvent) return;
+
+    int now = (cur & SCE_CTRL_CIRCLE) ? 1 : 0;
+    int was = (prev & SCE_CTRL_CIRCLE) ? 1 : 0;
+    if (now == was) return;
+
+    if (now) {
+        if (should_allow_back_input()) {
+            inputMfiEvent(&jni, NULL, MFI_BACK, 1);
+            circle_back_sent = 1;
+        }
+    } else if (circle_back_sent) {
+        inputMfiEvent(&jni, NULL, MFI_BACK, 0);
+        circle_back_sent = 0;
+    }
+}
+
+static uint32_t resolve_direction(uint32_t raw_buttons) {
+    static uint32_t prev_active_dirs = 0;
+    static uint32_t dir_order[INPUT_DIR_COUNT] = { 0 };
+    static uint32_t next_order = 1;
+
+    uint32_t active_dirs = 0;
+    for (int i = 0; i < INPUT_DIR_COUNT; ++i) {
+        if (raw_buttons & input_dir_buttons[i])
+            active_dirs |= input_dir_buttons[i];
+    }
+
+    uint32_t newly_active = active_dirs & ~prev_active_dirs;
+    for (int i = 0; i < INPUT_DIR_COUNT; ++i) {
+        if (newly_active & input_dir_buttons[i])
+            dir_order[i] = next_order++;
+    }
+    prev_active_dirs = active_dirs;
+
+    uint32_t best_button = 0;
+    uint32_t best_order = 0;
+    for (int i = 0; i < INPUT_DIR_COUNT; ++i) {
+        if ((active_dirs & input_dir_buttons[i]) && dir_order[i] >= best_order) {
+            best_order = dir_order[i];
+            best_button = input_dir_buttons[i];
+        }
+    }
+
+    return best_button;
+}
+
 static void process_input(void) {
     SceCtrlData pad;
     sceCtrlPeekBufferPositive(0, &pad, 1);
@@ -229,15 +336,17 @@ static void process_input(void) {
             if (ly > ANALOG_DEADZONE)  cur |= SCE_CTRL_DOWN;
         }
     }
+    uint32_t raw_dir_buttons = cur & (SCE_CTRL_LEFT | SCE_CTRL_RIGHT | SCE_CTRL_UP | SCE_CTRL_DOWN);
+    cur &= ~(SCE_CTRL_LEFT | SCE_CTRL_RIGHT | SCE_CTRL_UP | SCE_CTRL_DOWN);
+    cur |= resolve_direction(raw_dir_buttons);
 
     /* Send MFi press/release events for changed buttons */
     mfi_send_if_changed(SCE_CTRL_CROSS,    MFI_BUTTON_A,   cur, prev_buttons);
-    mfi_send_if_changed(SCE_CTRL_UP,       MFI_DPAD_UP,    cur, prev_buttons);
-    mfi_send_if_changed(SCE_CTRL_DOWN,     MFI_DPAD_DOWN,  cur, prev_buttons);
-    mfi_send_if_changed(SCE_CTRL_LEFT,     MFI_DPAD_LEFT,  cur, prev_buttons);
-    mfi_send_if_changed(SCE_CTRL_RIGHT,    MFI_DPAD_RIGHT, cur, prev_buttons);
+    mfi_send_direction_changes(cur, prev_buttons);
     mfi_send_if_changed(SCE_CTRL_START,    MFI_MENU,       cur, prev_buttons);
-    mfi_send_if_changed(SCE_CTRL_LTRIGGER, MFI_L2,         cur, prev_buttons);
+    mfi_send_back_if_allowed(cur, prev_buttons);
+    mfi_send_mask_if_changed(SCE_CTRL_LTRIGGER | SCE_CTRL_RTRIGGER, MFI_L2,
+                             cur, prev_buttons);
 
     prev_buttons = cur;
 
@@ -248,9 +357,11 @@ static void process_input(void) {
     if (cur & SCE_CTRL_LEFT)     buttonMask |= IKEY_PAD_LEFT;
     if (cur & SCE_CTRL_RIGHT)    buttonMask |= IKEY_PAD_RIGHT;
     if (cur & SCE_CTRL_CROSS)    buttonMask |= IKEY_PAD_A;
+    if ((cur & SCE_CTRL_CIRCLE) && should_allow_back_input())
+        buttonMask |= IKEY_PAD_B | IKEY_PAD_BACK;
     if (cur & SCE_CTRL_SQUARE)   buttonMask |= IKEY_PAD_C;
     if (cur & SCE_CTRL_TRIANGLE) buttonMask |= IKEY_PAD_D;
-    if (cur & SCE_CTRL_LTRIGGER) buttonMask |= IKEY_PAD_L1;
+    if (cur & (SCE_CTRL_LTRIGGER | SCE_CTRL_RTRIGGER)) buttonMask |= IKEY_PAD_L1;
     if (cur & SCE_CTRL_RTRIGGER) buttonMask |= IKEY_PAD_R1;
     if (cur & SCE_CTRL_START)    buttonMask |= IKEY_PAD_START;
     if (cur & SCE_CTRL_SELECT)   buttonMask |= IKEY_PAD_SELECT;
