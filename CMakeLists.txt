@@ -162,6 +162,7 @@ add_executable(${CMAKE_PROJECT_NAME}
                source/utils/pgxt.c
                source/utils/preloader.c
                source/utils/settings.c
+               source/utils/text_patch.c
                source/utils/utils.c
                lib/falso_jni/FalsoJNI.c
                lib/falso_jni/FalsoJNI_ImplBridge.c

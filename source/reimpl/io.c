@@ -26,6 +26,7 @@
 #include "utils/utils.h"
 #include "utils/preloader.h"
 #include "utils/pgxt.h"
+#include "utils/text_patch.h"
 #include <psp2/kernel/processmgr.h>
 
 /* ===== Profiling counters (shared with java.c) =====
@@ -525,7 +526,8 @@ FILE * fopen_soloader(const char * filename, const char * mode) {
      * so those calls become memcpy instead of stdio. fmemopen returns a
      * newlib FILE*, so fread_soloader/fseek_soloader/fclose_soloader
      * already route correctly via preloader_is_preloaded(). */
-    if (ret && only_read && prof_ends_with(filename, ".runnybin")) {
+    if (ret && only_read &&
+        (prof_ends_with(filename, ".runnybin") || prof_ends_with(filename, "texts_en.bin"))) {
         long sz = -1;
 #ifdef USE_SCELIBC_IO
         if (sceLibcBridge_fseek(ret, 0, SEEK_END) == 0) {
@@ -550,6 +552,10 @@ FILE * fopen_soloader(const char * filename, const char * mode) {
                 got = fread(slurp_buf, 1, (size_t)sz, ret);
 #endif
                 if (got == (size_t)sz) {
+                    int text_patches = pmcedx_patch_text_asset(filename, slurp_buf, (size_t)sz);
+                    if (text_patches > 0) {
+                        l_info("[TEXT] patched %d prompt string(s) in %s", text_patches, filename);
+                    }
                     /* Close the on-disk handle and replace with fmemopen. */
                     prof_unregister_file(ret);
 #ifdef USE_SCELIBC_IO

@@ -25,6 +25,7 @@
 #include <vitasdk.h>
 
 #include "utils/logger.h"
+#include "utils/text_patch.h"
 
 /*
  * APKFileHelper reimplementation
@@ -50,6 +51,7 @@ typedef struct {
     int position;
     int bufferSize;
     JavaDynArray *data;  /* byte[] buffer for reads */
+    char name[128];
 } VitaAPKFile;
 
 /* Global state for field access (FalsoJNI fields are global, not per-object) */
@@ -290,6 +292,7 @@ static jobject apk_openFileAndroid(jmethodID id, va_list args) {
     apk->fp = fp;
     apk->length = length;
     apk->position = 0;
+    snprintf(apk->name, sizeof(apk->name), "%s", filename);
     /* Pre-allocate buffer to the file size (capped at 4MB) to avoid
      * repeated realloc cycles when reading large audio assets. */
     int init_buf = length < (4 * 1024 * 1024) ? length : (4 * 1024 * 1024);
@@ -349,6 +352,12 @@ static void apk_readFileAndroid(jmethodID id, va_list args) {
     uint64_t _prof_rt0 = prof_now_us();
     int bytesRead = (int)fread(apk->data->array, 1, numBytes, apk->fp);
     uint64_t _prof_rdt = prof_now_us() - _prof_rt0;
+    if (bytesRead > 0) {
+        int text_patches = pmcedx_patch_text_asset(apk->name, apk->data->array, (size_t)bytesRead);
+        if (text_patches > 0) {
+            l_info("[TEXT] patched %d prompt string(s) in %s", text_patches, apk->name);
+        }
+    }
     apk->position += bytesRead;
     g_prof_read_count++;
     g_prof_read_bytes += (uint64_t)bytesRead;
