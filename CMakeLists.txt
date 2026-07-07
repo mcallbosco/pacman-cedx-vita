@@ -19,8 +19,24 @@ include("${VITASDK}/share/vita.cmake" REQUIRED)
 set(VITA_APP_NAME "PAC-MAN CE DX")
 set(VITA_TITLEID "PCMN00001")
 set(VITA_VPKNAME "pacmancedx")
-set(VITA_VERSION "01.00")
+set(VITA_VERSION "02.00")
 set(VITA_MKSFOEX_FLAGS "-d ATTRIBUTE2=12")
+
+set(VITA_LIVEAREA_DISPLAY_VERSION "${VITA_VERSION}")
+string(REGEX REPLACE "^0+([0-9])" "\\1" VITA_LIVEAREA_DISPLAY_VERSION "${VITA_LIVEAREA_DISPLAY_VERSION}")
+string(REGEX REPLACE "0+$" "" VITA_LIVEAREA_DISPLAY_VERSION "${VITA_LIVEAREA_DISPLAY_VERSION}")
+string(REGEX REPLACE "\\.$" ".0" VITA_LIVEAREA_DISPLAY_VERSION "${VITA_LIVEAREA_DISPLAY_VERSION}")
+string(REGEX REPLACE "[^0-9]" "" VITA_LIVEAREA_CONTENT_REV "${VITA_VERSION}")
+string(REGEX REPLACE "^0+" "" VITA_LIVEAREA_CONTENT_REV "${VITA_LIVEAREA_CONTENT_REV}")
+if (VITA_LIVEAREA_CONTENT_REV STREQUAL "")
+  set(VITA_LIVEAREA_CONTENT_REV "1")
+endif()
+set(VITA_LIVEAREA_CREDIT_TEXT "Ported by Mcall - v${VITA_LIVEAREA_DISPLAY_VERSION}")
+configure_file(
+  ${CMAKE_SOURCE_DIR}/extras/livearea/template.xml.in
+  ${CMAKE_BINARY_DIR}/livearea/template.xml
+  @ONLY
+)
 
 # Game-specific definitions
 # DATA_PATH:         game data copied to the memory card (ux0:) — not bundled
@@ -162,6 +178,7 @@ add_executable(${CMAKE_PROJECT_NAME}
                source/utils/pgxt.c
                source/utils/preloader.c
                source/utils/settings.c
+               source/utils/text_patch.c
                source/utils/utils.c
                lib/falso_jni/FalsoJNI.c
                lib/falso_jni/FalsoJNI_ImplBridge.c
@@ -336,6 +353,6 @@ vita_create_vpk(${VITA_VPKNAME}.vpk ${VITA_TITLEID} eboot.bin
                 ${CMAKE_SOURCE_DIR}/extras/livearea/pic0.png sce_sys/pic0.png
                 ${CMAKE_SOURCE_DIR}/extras/livearea/startup.png sce_sys/livearea/contents/startup.png
                 ${CMAKE_SOURCE_DIR}/extras/livearea/bg0.png sce_sys/livearea/contents/bg0.png
-                ${CMAKE_SOURCE_DIR}/extras/livearea/template.xml sce_sys/livearea/contents/template.xml
+                ${CMAKE_BINARY_DIR}/livearea/template.xml sce_sys/livearea/contents/template.xml
                 ${VPK_EXTRA_FILES}
                 )

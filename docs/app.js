@@ -1,26 +1,42 @@
 (() => {
   const apkDrop = document.getElementById('apk-drop');
   const obbDrop = document.getElementById('obb-drop');
+  const pcdatDrop = document.getElementById('pcdat-drop');
   const apkInput = document.getElementById('apk-input');
   const obbInput = document.getElementById('obb-input');
+  const pcdatInput = document.getElementById('pcdat-input');
   const apkName = document.getElementById('apk-name');
   const obbName = document.getElementById('obb-name');
+  const pcdatName = document.getElementById('pcdat-name');
   const buildBtn = document.getElementById('build-btn');
   const progressBox = document.getElementById('progress');
   const bar = document.getElementById('bar');
   const status = document.getElementById('status');
   const logBox = document.getElementById('log');
   const hashWarning = document.getElementById('hash-warning');
+  const pcAudioOptions = document.getElementById('pc-audio-options');
+  const pcAudioStatus = document.getElementById('pc-audio-status');
+  const pcMusicToggle = document.getElementById('pc-music-toggle');
+  const pcEffectsToggle = document.getElementById('pc-effects-toggle');
+  const pcMusicDelta = document.getElementById('pc-music-delta');
+  const pcEffectsDelta = document.getElementById('pc-effects-delta');
+  const dataSizeEstimate = document.getElementById('data-size-estimate');
 
   /** SHA-256 of known-good inputs (version 120); mismatch shows a warning only. */
   const EXPECTED_APK_SHA256 =
     '206be87112980605a5367f7432b69c38e95a5811fae9862afb66ad8bc08bf2a6';
   const EXPECTED_OBB_SHA256 =
     'f49083211370109f883965404b4a335b3125443379fc98197007e41e31337397';
+  const BASE_DATA_ESTIMATE_BYTES = 130 * 1024 * 1024;
 
   const state = {
     apk: null,
     obb: null,
+    pcdat: null,
+    replacePcMusic: true,
+    replacePcEffects: true,
+    pcAudioEstimate: null,
+    pcAudioEstimateToken: 0,
     apkHashOk: null,
     obbHashOk: null,
   };
@@ -68,6 +84,123 @@
     hashWarning.hidden = !(apkBad || obbBad);
   };
 
+  const fmtDelta = (n) => {
+    if (n === null || n === undefined) return 'Estimating...';
+    const sign = n >= 0 ? '+' : '-';
+    return `${sign}${fmtBytes(Math.abs(n))}`;
+  };
+
+  const selectedPcAudioDelta = () => {
+    const estimate = state.pcAudioEstimate;
+    if (!estimate) return null;
+    let total = 0;
+    if (state.replacePcMusic) total += estimate.bgm.delta;
+    if (state.replacePcEffects) total += estimate.wav.delta;
+    return total;
+  };
+
+  const updateDataSizeEstimate = () => {
+    const selectedDelta = selectedPcAudioDelta();
+    if (!state.pcdat) {
+      dataSizeEstimate.textContent = '~130 MB';
+    } else if (selectedDelta === null) {
+      dataSizeEstimate.textContent = '~130 MB + PC audio';
+    } else {
+      dataSizeEstimate.textContent = `~${fmtBytes(BASE_DATA_ESTIMATE_BYTES + selectedDelta)}`;
+    }
+  };
+
+  const updatePcAudioPanel = () => {
+    pcAudioOptions.hidden = !state.pcdat;
+    updateDataSizeEstimate();
+    if (!state.pcdat) return;
+
+    pcMusicToggle.checked = state.replacePcMusic;
+    pcEffectsToggle.checked = state.replacePcEffects;
+
+    const estimate = state.pcAudioEstimate;
+    if (!estimate) {
+      pcMusicDelta.textContent = state.apk && state.obb ? 'Estimating...' : 'Waiting for APK + OBB';
+      pcEffectsDelta.textContent = state.apk && state.obb ? 'Estimating...' : 'Waiting for APK + OBB';
+      pcAudioStatus.textContent = state.apk && state.obb
+        ? 'Estimating PC audio size changes...'
+        : 'Add APK and OBB to estimate size changes';
+      return;
+    }
+
+    pcMusicDelta.textContent = `${estimate.bgm.count} files, ${fmtDelta(estimate.bgm.delta)}`;
+    pcEffectsDelta.textContent = `${estimate.wav.count} files, ${fmtDelta(estimate.wav.delta)}`;
+    pcAudioStatus.textContent =
+      `Selected PC audio adds about ${fmtDelta(selectedPcAudioDelta())} to the data folder`;
+    updateDataSizeEstimate();
+  };
+
+  const pcAudioKindEnabled = (kind) =>
+    kind === 'bgm' ? state.replacePcMusic : state.replacePcEffects;
+
+  const findPcAudioTarget = (entry, hasPath) => {
+    const candidates = entry.outputPaths || [entry.outputPath];
+    return candidates.find((path) => hasPath(path)) || null;
+  };
+
+  const estimatePcAudioSizes = async () => {
+    const token = ++state.pcAudioEstimateToken;
+    state.pcAudioEstimate = null;
+    updatePcAudioPanel();
+    if (!state.pcdat || !state.apk || !state.obb) return;
+
+    try {
+      const [apkBytes, obbBytes, datBytes] = await Promise.all([
+        readFile(state.apk),
+        readFile(state.obb),
+        readFile(state.pcdat),
+      ]);
+      if (token !== state.pcAudioEstimateToken) return;
+
+      const [apkFiles, obbFiles] = await Promise.all([
+        unzipAsync(apkBytes),
+        unzipAsync(obbBytes),
+      ]);
+      if (token !== state.pcAudioEstimateToken) return;
+
+      const assetSizes = Object.create(null);
+      for (const [name, data] of Object.entries(apkFiles)) {
+        if (data && !name.endsWith('/') && name.startsWith('assets/')) {
+          assetSizes[name] = data.length;
+        }
+      }
+      for (const [name, data] of Object.entries(obbFiles)) {
+        if (data && !name.endsWith('/')) assetSizes[name] = data.length;
+      }
+
+      const dat = pmcedxPcDatAudio.open(datBytes);
+      const estimate = {
+        bgm: { count: 0, androidBytes: 0, pcBytes: 0, delta: 0 },
+        wav: { count: 0, androidBytes: 0, pcBytes: 0, delta: 0 },
+      };
+
+      for (const entry of dat.listAudioFiles()) {
+        const target = findPcAudioTarget(entry, (path) => assetSizes[path] !== undefined);
+        if (!target) continue;
+        const bucket = entry.kind === 'bgm' ? estimate.bgm : estimate.wav;
+        bucket.count += 1;
+        bucket.androidBytes += assetSizes[target];
+        bucket.pcBytes += entry.length;
+      }
+      for (const bucket of [estimate.bgm, estimate.wav]) {
+        bucket.delta = bucket.pcBytes - bucket.androidBytes;
+      }
+
+      state.pcAudioEstimate = estimate;
+      updatePcAudioPanel();
+    } catch (e) {
+      if (token !== state.pcAudioEstimateToken) return;
+      pcAudioStatus.textContent = `Could not estimate PC audio sizes: ${e.message || e}`;
+      pcMusicDelta.textContent = 'Unknown';
+      pcEffectsDelta.textContent = 'Unknown';
+    }
+  };
+
   const bindDrop = (zone, input, slot) => {
     zone.addEventListener('click', () => input.click());
     zone.addEventListener('dragover', (e) => {
@@ -90,14 +223,25 @@
   const handleFile = (slot, file) => {
     state[slot] = file;
     if (slot === 'apk') state.apkHashOk = null;
-    else state.obbHashOk = null;
+    else if (slot === 'obb') state.obbHashOk = null;
     updateHashWarning();
 
-    const zone = slot === 'apk' ? apkDrop : obbDrop;
-    const label = slot === 'apk' ? apkName : obbName;
+    const zones = { apk: apkDrop, obb: obbDrop, pcdat: pcdatDrop };
+    const labels = { apk: apkName, obb: obbName, pcdat: pcdatName };
+    const zone = zones[slot];
+    const label = labels[slot];
     label.textContent = `${file.name} — ${fmtBytes(file.size)}`;
     zone.classList.add('ready');
     refreshButton();
+
+    if (slot === 'pcdat') {
+      state.replacePcMusic = true;
+      state.replacePcEffects = true;
+      estimatePcAudioSizes();
+      return;
+    }
+
+    estimatePcAudioSizes();
 
     const expected = slot === 'apk' ? EXPECTED_APK_SHA256 : EXPECTED_OBB_SHA256;
     const canDigest =
@@ -126,6 +270,17 @@
 
   bindDrop(apkDrop, apkInput, 'apk');
   bindDrop(obbDrop, obbInput, 'obb');
+  bindDrop(pcdatDrop, pcdatInput, 'pcdat');
+
+  pcMusicToggle.addEventListener('change', () => {
+    state.replacePcMusic = pcMusicToggle.checked;
+    updatePcAudioPanel();
+  });
+  pcEffectsToggle.addEventListener('change', () => {
+    state.replacePcEffects = pcEffectsToggle.checked;
+    updatePcAudioPanel();
+  });
+  updateDataSizeEstimate();
 
   // Prevent the window from eating drops that miss the zones.
   ['dragover', 'drop'].forEach((ev) =>
@@ -293,7 +448,7 @@
     progressBox.hidden = false;
 
     try {
-      const { apk, obb } = state;
+      const { apk, obb, pcdat } = state;
 
       setProgress(2, `Reading APK (${fmtBytes(apk.size)})…`);
       const apkBytes = await readFile(apk, (p) =>
@@ -387,6 +542,53 @@
         obbAdded += 1;
       }
       log(`OBB: ${obbAdded} entries merged (${obbOverrides} overrode APK)`, 'ok');
+
+      if (pcdat && (state.replacePcMusic || state.replacePcEffects)) {
+        if (typeof pmcedxPcDatAudio === 'undefined') {
+          throw new Error('PC DAT audio reader was not loaded');
+        }
+        setProgress(73, `Reading PC audio DAT (${fmtBytes(pcdat.size)})…`);
+        const datBytes = await readFile(pcdat, (p) =>
+          setProgress(72 + p * 2, `Reading PC audio DAT… ${(p * 100).toFixed(0)}%`)
+        );
+        const dat = pmcedxPcDatAudio.open(datBytes);
+        const audioEntries = dat.listAudioFiles();
+        let pcAudioFiles = 0;
+        let pcAudioBytes = 0;
+        let pcAudioOverrides = 0;
+        let pcAudioSkipped = 0;
+        let pcMusicFiles = 0;
+        let pcEffectFiles = 0;
+        for (const entry of audioEntries) {
+          if (!pcAudioKindEnabled(entry.kind)) {
+            pcAudioSkipped += 1;
+            continue;
+          }
+          const outputPath = findPcAudioTarget(entry, (path) => out[DATA_PREFIX + path]);
+          if (!outputPath) {
+            pcAudioSkipped += 1;
+            continue;
+          }
+          const data = dat.readFile(entry);
+          const validation = dat.validateAudio(entry, data);
+          if (!validation.ok) {
+            log(`  pc-audio: ${entry.sourcePath} failed validation (${validation.message || 'unknown format'})`, 'warn');
+          }
+          const dest = DATA_PREFIX + outputPath;
+          if (out[dest]) pcAudioOverrides += 1;
+          out[dest] = data;
+          pcAudioFiles += 1;
+          if (entry.kind === 'bgm') pcMusicFiles += 1;
+          else pcEffectFiles += 1;
+          pcAudioBytes += data.length;
+        }
+        log(
+          `PC audio: ${pcAudioFiles} files merged (${pcMusicFiles} music, ${pcEffectFiles} effects, ${fmtBytes(pcAudioBytes)}, ${pcAudioOverrides} overrode Android assets, ${pcAudioSkipped} skipped)`,
+          'ok'
+        );
+      } else if (pcdat) {
+        log('PC audio DAT selected, but music and sound-effect replacement are both off', 'warn');
+      }
 
       // -------- Apply Vita-specific overrides on top of OBB data --------
       // docs/overrides/manifest.json lists small per-file edits that the

@@ -35,6 +35,15 @@
         <span class="file-name" id="obb-name">No file selected</span>
       </div>
     </div>
+
+    <div class="dropzone optional" id="pcdat-drop">
+      <input type="file" id="pcdat-input" accept=".dat" hidden />
+      <div class="drop-label">
+        <span class="slot">PC DAT</span>
+        <span class="hint">Optional: drop Steam <code>PAC-MAN.dat</code> to use PC music and sounds</span>
+        <span class="file-name" id="pcdat-name">No file selected</span>
+      </div>
+    </div>
   </section>
 
   <div id="hash-warning" class="hash-warning" hidden role="alert">
@@ -44,6 +53,27 @@
       <a href="https://archive.org/">Internet Archive</a>.
     </p>
   </div>
+
+  <section class="pc-audio-options" id="pc-audio-options" hidden>
+    <div class="pc-audio-head">
+      <span class="slot">PC AUDIO</span>
+      <span id="pc-audio-status">Add APK and OBB to estimate size changes</span>
+    </div>
+    <div class="toggle-row">
+      <label class="toggle">
+        <input type="checkbox" id="pc-music-toggle" checked />
+        <span>Replace music</span>
+        <em>Very noticeable</em>
+        <strong id="pc-music-delta">Estimating...</strong>
+      </label>
+      <label class="toggle">
+        <input type="checkbox" id="pc-effects-toggle" checked />
+        <span>Replace sound effects</span>
+        <em>Less noticeable</em>
+        <strong id="pc-effects-delta">Estimating...</strong>
+      </label>
+    </div>
+  </section>
 
   <section class="actions">
     <button id="build-btn" disabled>Build Vita installer</button>
@@ -58,7 +88,7 @@
     <h2>How to install on your Vita</h2>
     <p>
       Clicking <strong>Build Vita installer</strong> produces two files:
-      a ~2 MB <code>pacmancedx.vpk</code> (loader + LiveArea) and a ~130 MB
+      a ~2 MB <code>pacmancedx.vpk</code> (loader + LiveArea) and a <span id="data-size-estimate">~130 MB</span>
       <code>pacmancedx-data.zip</code> (game data). Keeping the data outside the
       VPK avoids VitaShell installing hundreds of megabytes through the package
       installer; you copy the loose data over the network instead.
@@ -89,6 +119,7 @@
 <script src="vendor/pako_deflate.min.js"></script>
 <script src="vendor/UPNG.js"></script>
 <script src="vendor/pgxt.js"></script>
+<script src="pcdat-audio.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

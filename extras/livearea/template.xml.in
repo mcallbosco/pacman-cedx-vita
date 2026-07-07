@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 
-<livearea style="a1" format-ver="01.00" content-rev="1">
+<livearea style="a1" format-ver="01.00" content-rev="@VITA_LIVEAREA_CONTENT_REV@">
 	<livearea-background>
 		<image>bg0.png</image>
 	</livearea-background>
@@ -20,11 +20,8 @@
 
 	<frame id="frame3">
 		<liveitem>
-			<text origin="background" align="center" line-align="center" text-valign="bottom" margin-bottom="32">
-				<str size="22" bold="on" shadow="on" color="#ffffff">Ported by Mcall</str>
-			</text>
-			<text origin="background" align="center" line-align="center" text-valign="bottom" margin-bottom="12">
-				<str size="16" bold="on" shadow="on" color="#cccccc">Version 1.0</str>
+			<text origin="background" align="center" line-align="center" text-valign="bottom" margin-bottom="18" ellipsis="off">
+				<str size="20" bold="on" shadow="on" color="#ffffff">@VITA_LIVEAREA_CREDIT_TEXT@</str>
 			</text>
 		</liveitem>
 	</frame>

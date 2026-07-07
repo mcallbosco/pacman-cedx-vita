@@ -6,6 +6,7 @@
  */
 
 #include "reimpl/controls.h"
+#include "utils/logger.h"
 
 #include <math.h>
 #include <psp2/ctrl.h>
@@ -16,6 +17,11 @@
 #define LEFT_ANALOG_DEADZONE  0.16f
 #define RIGHT_ANALOG_DEADZONE 0.16f
 
+#define TOUCH_SCREEN_WIDTH  960.0f
+#define TOUCH_SCREEN_HEIGHT 544.0f
+
+static SceTouchPanelInfo front_touch_info;
+static int front_touch_info_valid = 0;
 
 void coord_normalize(float * x, float * y, float deadzone) {
     float magnitude = sqrtf((*x * *x) + (*y * *y));
@@ -37,7 +43,20 @@ void coord_normalize(float * x, float * y, float deadzone) {
 void controls_init() {
     // Enable analog sticks and touchscreen
     sceCtrlSetSamplingModeExt(SCE_CTRL_MODE_ANALOG_WIDE);
-    sceTouchSetSamplingState(SCE_TOUCH_PORT_FRONT, 1);
+    int ret = sceTouchSetSamplingState(SCE_TOUCH_PORT_FRONT, SCE_TOUCH_SAMPLING_STATE_START);
+    l_info("sceTouchSetSamplingState(front): %d", ret);
+
+    ret = sceTouchGetPanelInfo(SCE_TOUCH_PORT_FRONT, &front_touch_info);
+    if (ret >= 0) {
+        front_touch_info_valid = 1;
+        l_info("front touch panel: active=(%d,%d)-(%d,%d) display=(%d,%d)-(%d,%d)",
+               front_touch_info.minAaX, front_touch_info.minAaY,
+               front_touch_info.maxAaX, front_touch_info.maxAaY,
+               front_touch_info.minDispX, front_touch_info.minDispY,
+               front_touch_info.maxDispX, front_touch_info.maxDispY);
+    } else {
+        l_warn("sceTouchGetPanelInfo(front) failed: %d; using 1920x1088 fallback", ret);
+    }
 
     // Enable accelerometer
     sceMotionStartSampling();
@@ -50,7 +69,7 @@ void poll_accel();
 void poll_stick(ControlsStickId which, float raw_x, float raw_y, float * readings_x, float * readings_y, float deadzone);
 
 void controls_poll() {
-    poll_touch();
+    controls_poll_touch();
     poll_pad();
     //poll_accel();
 }
@@ -58,12 +77,38 @@ void controls_poll() {
 SceTouchData touch;
 SceTouchData touch_old;
 
+static float touch_scale_x(int raw_x) {
+    if (front_touch_info_valid && front_touch_info.maxDispX > front_touch_info.minDispX) {
+        return ((float)(raw_x - front_touch_info.minDispX) * TOUCH_SCREEN_WIDTH) /
+               (float)(front_touch_info.maxDispX - front_touch_info.minDispX);
+    }
+
+    return (float)raw_x * TOUCH_SCREEN_WIDTH / 1920.0f;
+}
+
+static float touch_scale_y(int raw_y) {
+    if (front_touch_info_valid && front_touch_info.maxDispY > front_touch_info.minDispY) {
+        return ((float)(raw_y - front_touch_info.minDispY) * TOUCH_SCREEN_HEIGHT) /
+               (float)(front_touch_info.maxDispY - front_touch_info.minDispY);
+    }
+
+    return (float)raw_y * TOUCH_SCREEN_HEIGHT / 1088.0f;
+}
+
+void controls_poll_touch() {
+    poll_touch();
+}
+
 void poll_touch() {
-    sceTouchPeek(SCE_TOUCH_PORT_FRONT, &touch, 1);
+    int ret = sceTouchPeek(SCE_TOUCH_PORT_FRONT, &touch, 1);
+    if (ret < 0) {
+        l_warn("sceTouchPeek(front) failed: %d", ret);
+        return;
+    }
 
     for (int i = 0; i < touch.reportNum; i++) {
-        float x = (float) touch.report[i].x * 960.f / 1920.0f;
-        float y = (float) touch.report[i].y * 544.f / 1088.0f;
+        float x = touch_scale_x(touch.report[i].x);
+        float y = touch_scale_y(touch.report[i].y);
 
         // Check if the finger was down before to distinguish between the Move and Down events
         int finger_down = 0;
@@ -95,8 +140,8 @@ void poll_touch() {
         }
 
         if (finger_up == 1) {
-            float x = (float) touch_old.report[i].x * 960.f / 1920.0f;
-            float y = (float) touch_old.report[i].y * 544.f / 1088.0f;
+            float x = touch_scale_x(touch_old.report[i].x);
+            float y = touch_scale_y(touch_old.report[i].y);
 
             controls_handler_touch(touch_old.report[i].id, x, y, CONTROLS_ACTION_UP);
         }
