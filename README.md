@@ -4,6 +4,8 @@
 
 ![Screenshot](pmcedx-readme.jpg)
 
+AI was used in development.
+
 Drop in your APK + OBB in the browser and it'll hand you back a single `pacmancedx.zip` containing the ready-to-install VPK and a `pacmancedx/` data folder. You can optionally drop in the Steam `PAC-MAN.dat` too, and the browser beta will use the PC music/sound assets in place of the Android audio. Nothing leaves your machine. This repo is the source code behind that site and the loader VPK it builds.
 
 ---
