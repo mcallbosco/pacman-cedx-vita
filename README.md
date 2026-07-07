@@ -4,7 +4,7 @@
 
 ![Screenshot](pmcedx-readme.jpg)
 
-Drop in your APK + OBB in the browser and it'll hand you back a single `pacmancedx.zip` containing the ready-to-install VPK and a `pacmancedx/` data folder. Nothing leaves your machine. This repo is the source code behind that site and the loader VPK it builds.
+Drop in your APK + OBB in the browser and it'll hand you back a single `pacmancedx.zip` containing the ready-to-install VPK and a `pacmancedx/` data folder. You can optionally drop in the Steam `PAC-MAN.dat` too, and the browser beta will use the PC music/sound assets in place of the Android audio. Nothing leaves your machine. This repo is the source code behind that site and the loader VPK it builds.
 
 ---
 
@@ -30,6 +30,8 @@ A homebrew `.so`-loader port of **PAC-MAN Championship Edition DX** (Android) to
 Don't build from source — just visit **[pacmancedx.mcallbos.co](https://pacmancedx.mcallbos.co/)** and drop in your APK + OBB. You'll get back a single `pacmancedx.zip`. Unzip it and you'll have:
 - `pacmancedx.vpk` — install via VitaShell
 - `pacmancedx/` — FTP this folder to `ux0:data/`
+
+The optional PC DAT audio beta accepts the Steam `PAC-MAN.dat` in that same browser flow.
 
 ## For developers — building the loader
 

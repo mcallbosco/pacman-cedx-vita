@@ -59,7 +59,7 @@ main {
 .titles h1 {
   margin: 0;
   font-size: 2.1rem;
-  letter-spacing: -.01em;
+  letter-spacing: 0;
 }
 
 code, kbd {
@@ -77,7 +77,7 @@ kbd {
 
 .picker {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 16px;
   margin: 22px 0;
 }
@@ -107,9 +107,69 @@ kbd {
   text-decoration: underline;
 }
 
+.pc-audio-options {
+  background: var(--panel);
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin: 0 0 20px;
+}
+
+.pc-audio-head {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  color: var(--ink-dim);
+  font-size: .92rem;
+  margin-bottom: 12px;
+}
+
+.toggle-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
+}
+
+.toggle {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px 10px;
+  align-items: center;
+  padding: 12px;
+  border-radius: 8px;
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.07);
+}
+
+.toggle input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+}
+
+.toggle span {
+  font-weight: 700;
+}
+
+.toggle em {
+  grid-column: 2;
+  color: var(--ink);
+  font-size: .84rem;
+  font-style: normal;
+}
+
+.toggle strong {
+  grid-column: 2;
+  color: var(--ink-dim);
+  font-size: .86rem;
+  font-weight: 600;
+}
+
 @media (max-width: 680px) {
   .picker { grid-template-columns: 1fr; }
   .hero-inner { flex-direction: column; text-align: center; padding: 28px 20px 32px; }
+  .pc-audio-head { align-items: flex-start; }
 }
 
 .dropzone {
@@ -144,10 +204,14 @@ kbd {
   font-size: .78rem;
   font-weight: 700;
   border-radius: 999px;
-  letter-spacing: .02em;
+  letter-spacing: 0;
 }
 
-.hint { color: var(--ink-dim); font-size: .92rem; }
+.hint { color: var(--ink-dim); font-size: .92rem; min-width: 0; }
+.hint code {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .file-name {
   color: var(--ink);
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
