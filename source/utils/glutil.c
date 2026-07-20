@@ -165,6 +165,8 @@ static int settings_msaa_to_gxm_mode(int msaa_mode) {
 void gl_init() {
     int gxm_msaa_mode = settings_msaa_to_gxm_mode(setting_msaaMode);
     l_info("gl_init: MSAA setting=%s (gxm=%d)", settings_msaa_to_string(setting_msaaMode), gxm_msaa_mode);
+    /* Temporary geometry uses rotating pools, with allocation fallback for peaks. */
+    vglSetVertexPoolSize(8 * 1024 * 1024);
     vglInitExtended(0, 960, 544, 24 * 1024 * 1024, gxm_msaa_mode);
 }
 

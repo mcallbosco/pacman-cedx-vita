@@ -42,6 +42,19 @@ char vgl_file_cache_path[256];
 #define MAX_CUSTOM_SHADERS 2048 // Maximum number of linkable custom shaders
 #define MAX_CUSTOM_PROGRAMS 1024 // Maximum number of linkable custom programs
 
+#ifndef SKIP_ERROR_HANDLING
+static int validateDrawTexture(texture *tex) {
+	/* Compare the whole descriptor so storage and sampler changes invalidate it. */
+	if (tex->validation_cached && !memcmp(&tex->validated_tex, &tex->gxm_tex, sizeof(tex->gxm_tex)))
+		return 0;
+	int result = sceGxmTextureValidate(&tex->gxm_tex);
+	tex->validation_cached = result == 0;
+	if (tex->validation_cached)
+		tex->validated_tex = tex->gxm_tex;
+	return result;
+}
+#endif
+
 #define setDefaultAttribBindings() \
 	uint32_t cnt = sceGxmProgramGetParameterCount(p->vshader->prog); \
 	uint32_t *ptr = vglProgramGetParameterBase(p->vshader->prog); \
@@ -710,7 +723,7 @@ void _glMultiDrawArrays_CustomShadersIMPL(SceGxmPrimitiveType gxm_p, uint16_t *i
 			restoreTexCache(tex);
 #endif
 #ifndef SKIP_ERROR_HANDLING
-			int r = sceGxmTextureValidate(&tex->gxm_tex);
+			int r = validateDrawTexture(tex);
 			if (r) {
 				vgl_log("%s:%d glDrawArrays: Fragment %s texture on TEXUNIT%d is invalid (%s), draw will be skipped.\n", __FILE__, __LINE__, tex_type ? "cube" : "2D", i, get_gxm_error_literal(r));
 				return;
@@ -762,7 +775,7 @@ void _glMultiDrawArrays_CustomShadersIMPL(SceGxmPrimitiveType gxm_p, uint16_t *i
 			uint8_t tex_type = p->vert_texunits[i]->size ? 2 : tex2d_override;
 			texture *tex = &texture_slots[tex_unit->tex_id[tex_type]];
 #ifndef SKIP_ERROR_HANDLING
-			int r = sceGxmTextureValidate(&tex->gxm_tex);
+			int r = validateDrawTexture(tex);
 			if (r) {
 				vgl_log("%s:%d glMultiDrawArrays: Vertex %s texture on TEXUNIT%d is invalid (%s), draw will be skipped.\n", __FILE__, __LINE__, tex_type ? "cube" : "2D", i, get_gxm_error_literal(r));
 				return;
@@ -927,7 +940,7 @@ GLboolean _glDrawArrays_CustomShadersIMPL(GLint first, GLsizei count, GLboolean 
 			restoreTexCache(tex);
 #endif
 #ifndef SKIP_ERROR_HANDLING
-			int r = sceGxmTextureValidate(&tex->gxm_tex);
+			int r = validateDrawTexture(tex);
 			if (r) {
 				vgl_log("%s:%d glDrawArrays: Fragment %s texture on TEXUNIT%d is invalid (%s), draw will be skipped.\n", __FILE__, __LINE__, tex_type ? "cube" : "2D", i, get_gxm_error_literal(r));
 				return GL_FALSE;
@@ -979,7 +992,7 @@ GLboolean _glDrawArrays_CustomShadersIMPL(GLint first, GLsizei count, GLboolean 
 			uint8_t tex_type = p->vert_texunits[i]->size ? 2 : tex2d_override;
 			texture *tex = &texture_slots[tex_unit->tex_id[tex_type]];
 #ifndef SKIP_ERROR_HANDLING
-			int r = sceGxmTextureValidate(&tex->gxm_tex);
+			int r = validateDrawTexture(tex);
 			if (r) {
 				vgl_log("%s:%d glDrawArrays: Vertex %s texture on TEXUNIT%d is invalid (%s), draw will be skipped.\n", __FILE__, __LINE__, tex_type ? "cube" : "2D", i, get_gxm_error_literal(r));
 				return GL_FALSE;
@@ -1173,7 +1186,7 @@ GLboolean _glDrawElements_CustomShadersIMPL(uint16_t *idx_buf, GLsizei count, ui
 			restoreTexCache(tex);
 #endif
 #ifndef SKIP_ERROR_HANDLING
-			int r = sceGxmTextureValidate(&tex->gxm_tex);
+			int r = validateDrawTexture(tex);
 			if (r) {
 				vgl_log("%s:%d glDrawElements: Fragment %s texture on TEXUNIT%d is invalid (%s), draw will be skipped.\n", __FILE__, __LINE__, tex_type ? "cube" : "2D", i, get_gxm_error_literal(r));
 				return GL_FALSE;
@@ -1225,7 +1238,7 @@ GLboolean _glDrawElements_CustomShadersIMPL(uint16_t *idx_buf, GLsizei count, ui
 			uint8_t tex_type = p->vert_texunits[i]->size ? 2 : tex2d_override;
 			texture *tex = &texture_slots[tex_unit->tex_id[tex_type]];
 #ifndef SKIP_ERROR_HANDLING
-			int r = sceGxmTextureValidate(&tex->gxm_tex);
+			int r = validateDrawTexture(tex);
 			if (r) {
 				vgl_log("%s:%d glDrawElements: Vertex %s texture on TEXUNIT%d is invalid (%s), draw will be skipped.\n", __FILE__, __LINE__, tex_type ? "cube" : "2D", i, get_gxm_error_literal(r));
 				return GL_FALSE;
@@ -1959,6 +1972,10 @@ void glProgramBinary(GLuint prog, GLenum binaryFormat, const void *binary, GLsiz
 }
 
 void glDeleteProgram(GLuint prog) {
+	if (cur_program == prog) {
+		dirty_frag_unifs = GL_TRUE;
+		dirty_vert_unifs = GL_TRUE;
+	}
 	// Grabbing passed program
 	program *p = &progs[prog - 1];
 
@@ -2085,6 +2102,10 @@ void glGetProgramiv(GLuint progr, GLenum pname, GLint *params) {
 }
 
 void glLinkProgram(GLuint progr) {
+	if (cur_program == progr) {
+		dirty_frag_unifs = GL_TRUE;
+		dirty_vert_unifs = GL_TRUE;
+	}
 	// Grabbing passed program
 	program *p = &progs[progr - 1];
 
@@ -2366,6 +2387,8 @@ void glLinkProgram(GLuint progr) {
 }
 
 void glUseProgram(GLuint prog) {
+	if (cur_program == prog)
+		return;
 	// Setting current custom program to passed program
 	cur_program = prog;
 	dirty_frag_unifs = GL_TRUE;
@@ -2482,10 +2505,16 @@ inline void glUniform1i(GLint location, GLint v0) {
 	uniform *u = (uniform *)getUniformFromPtr(location, &offs);
 
 	// Setting passed value to desired uniform
-	if (u->size == 0 || u->size == 0xFFFFFFFF) // Sampler
+	if (u->size == 0 || u->size == 0xFFFFFFFF) { // Sampler
+		if (u->data == (float *)v0)
+			return;
 		u->data = (float *)v0;
-	else // Regular Uniform
-		u->data[offs] = (float)v0;
+	} else { // Regular Uniform
+		float value = (float)v0;
+		if (!memcmp(&u->data[offs], &value, sizeof(value)))
+			return;
+		u->data[offs] = value;
+	}
 
 	if (u->is_vertex)
 		dirty_vert_unifs = GL_TRUE;
@@ -2879,6 +2908,8 @@ inline void glUniform4fv(GLint location, GLsizei count, const GLfloat *value) {
 		count = u->size / 4;
 	}
 #endif
+	if (count == 0 || !memcmp(&u->data[offs * 4], value, count * 4 * sizeof(float)))
+		return;
 	vgl_fast_memcpy(&u->data[offs * 4], value, count * 4 * sizeof(float));
 
 	if (u->is_vertex)
@@ -2971,6 +3002,8 @@ inline void glUniformMatrix4fv(GLint location, GLsizei count, GLboolean transpos
 		count = u->size / 16;
 	}
 #endif
+	if (count == 0 || (!transpose && !memcmp(&u->data[offs * 16], value, count * 16 * sizeof(float))))
+		return;
 	if (transpose) {
 		for (int i = 0; i < count; i++) {
 			matrix4x4_transpose(&u->data[(offs + i) * 16], &value[i * 16]);

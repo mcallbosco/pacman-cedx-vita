@@ -115,6 +115,10 @@ typedef struct texture {
 	GLboolean dirty;
 	GLboolean overridden;
 	SceGxmTexture gxm_tex;
+#ifndef SKIP_ERROR_HANDLING
+	SceGxmTexture validated_tex;
+	GLboolean validation_cached;
+#endif
 	void *data;
 	void *palette_data;
 	uint32_t type;
