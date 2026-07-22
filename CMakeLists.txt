@@ -173,6 +173,7 @@ add_executable(${CMAKE_PROJECT_NAME}
                source/reimpl/asset_manager.cpp
                source/utils/dialog.c
                source/utils/glutil.c
+               source/utils/game_perf.c
                source/utils/init.c
                source/utils/logger.c
                source/utils/pgxt.c

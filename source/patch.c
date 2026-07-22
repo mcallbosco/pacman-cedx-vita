@@ -27,6 +27,7 @@ extern so_module fmod_mod;
 
 #include "utils/logger.h"
 #include "utils/pgxt.h"
+#include "utils/game_perf.h"
 #include <stdbool.h>
 
 static int ret0(void) { return 0; }
@@ -559,6 +560,7 @@ void so_patch(void) {
      * in foo.png.gxt (emitted by the website packager) bypasses libpng's
      * per-pixel CPU decode. Expected win: ~10–15 s of startup → ~1–2 s. */
     pgxt_install_hooks();
+    game_perf_install_hooks();
     so_flush_caches(&so_mod);
 
     l_info("Patches applied.");

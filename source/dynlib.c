@@ -395,124 +395,11 @@ __attribute__((naked)) static void strtold_sfp(void) {
 }
 
 /*
- * OpenGL soft-float ABI wrappers.
- * GL functions taking float args are called from the Android .so (softfp)
- * but vitaGL expects hard-float. We need wrappers for each signature.
+ * Android and the bundled vitaGL both use softfp (SOFTFP_ABI=1 in CMake).
+ * Float GL imports bind directly; only the map attribute fix and optional
+ * logging need wrappers. Converting these calls to hard-float would corrupt
+ * arguments when the conversion reuses a core argument register.
  */
-
-/* void func(GLint loc, GLfloat v0) — glUniform1f */
-__attribute__((naked)) static void glUniform1f_sfp(void) {
-    __asm__ volatile(
-        "vmov s0, r1\n"       /* float v0: r1 -> s0 */
-        "b glUniform1f\n"
-    );
-}
-
-/* void func(GLint loc, GLfloat v0, GLfloat v1) — glUniform2f */
-__attribute__((naked)) static void glUniform2f_sfp(void) {
-    __asm__ volatile(
-        "vmov s0, r1\n"       /* v0: r1 -> s0 */
-        "vmov s1, r2\n"       /* v1: r2 -> s1 */
-        "b glUniform2f\n"
-    );
-}
-
-/* void func(GLint loc, GLfloat v0, GLfloat v1, GLfloat v2) — glUniform3f */
-__attribute__((naked)) static void glUniform3f_sfp(void) {
-    __asm__ volatile(
-        "vmov s0, r1\n"
-        "vmov s1, r2\n"
-        "vmov s2, r3\n"
-        "b glUniform3f\n"
-    );
-}
-
-/* void func(GLint loc, GLfloat v0, GLfloat v1, GLfloat v2, GLfloat v3) — glUniform4f
- * 5 args: loc in r0, v0-v2 in r1-r3, v3 on stack [sp] */
-__attribute__((naked)) static void glUniform4f_sfp(void) {
-    __asm__ volatile(
-        "vmov s0, r1\n"
-        "vmov s1, r2\n"
-        "vmov s2, r3\n"
-        "ldr r1, [sp]\n"      /* v3 from stack */
-        "vmov s3, r1\n"
-        "b glUniform4f\n"
-    );
-}
-
-/* void glClearColor(GLfloat r, GLfloat g, GLfloat b, GLfloat a) — 4 floats in r0-r3 */
-__attribute__((naked)) static void glClearColor_sfp(void) {
-    __asm__ volatile(
-        "vmov s0, r0\n"
-        "vmov s1, r1\n"
-        "vmov s2, r2\n"
-        "vmov s3, r3\n"
-        "b glClearColor\n"
-    );
-}
-
-/* void glClearDepthf(GLfloat depth) — 1 float in r0 */
-__attribute__((naked)) static void glClearDepthf_sfp(void) {
-    __asm__ volatile(
-        "vmov s0, r0\n"
-        "b glClearDepthf\n"
-    );
-}
-
-/* void glColor4f(GLfloat r, GLfloat g, GLfloat b, GLfloat a) — 4 floats in r0-r3 */
-__attribute__((naked)) static void glColor4f_sfp(void) {
-    __asm__ volatile(
-        "vmov s0, r0\n"
-        "vmov s1, r1\n"
-        "vmov s2, r2\n"
-        "vmov s3, r3\n"
-        "b glColor4f\n"
-    );
-}
-
-/* void glDepthRangef(GLfloat near, GLfloat far) — 2 floats in r0, r1 */
-__attribute__((naked)) static void glDepthRangef_sfp(void) {
-    __asm__ volatile(
-        "vmov s0, r0\n"
-        "vmov s1, r1\n"
-        "b glDepthRangef\n"
-    );
-}
-
-/* void glLineWidth(GLfloat width) — 1 float in r0 */
-__attribute__((naked)) static void glLineWidth_sfp(void) {
-    __asm__ volatile(
-        "vmov s0, r0\n"
-        "b glLineWidth\n"
-    );
-}
-
-/* void glPolygonOffset(GLfloat factor, GLfloat units) — 2 floats */
-__attribute__((naked)) static void glPolygonOffset_sfp(void) {
-    __asm__ volatile(
-        "vmov s0, r0\n"
-        "vmov s1, r1\n"
-        "b glPolygonOffset\n"
-    );
-}
-
-/* glSampleCoverage — not exported by vitaGL, stubbed as ret0 in table */
-
-/* void glTexEnvf(GLenum target, GLenum pname, GLfloat param) — int, int, float in r2 */
-__attribute__((naked)) static void glTexEnvf_sfp(void) {
-    __asm__ volatile(
-        "vmov s0, r2\n"
-        "b glTexEnvf\n"
-    );
-}
-
-/* void glVertexAttrib1f(GLuint idx, GLfloat v0) */
-__attribute__((naked)) static void glVertexAttrib1f_sfp(void) {
-    __asm__ volatile(
-        "vmov s0, r1\n"
-        "b glVertexAttrib1f\n"
-    );
-}
 
 static float prog5_paramlight_value = 1.0f;
 
@@ -612,15 +499,6 @@ static void glVertexAttrib1f_sfp_log(uint32_t idx, uint32_t float_bits) {
     }
 }
 
-/* void glVertexAttrib2f(GLuint idx, GLfloat v0, GLfloat v1) */
-__attribute__((naked)) static void glVertexAttrib2f_sfp(void) {
-    __asm__ volatile(
-        "vmov s0, r1\n"
-        "vmov s1, r2\n"
-        "b glVertexAttrib2f\n"
-    );
-}
-
 /* void glVertexAttrib2f(GLuint idx, GLfloat v0, GLfloat v1) — logging version */
 static int va2f_log_count = 0;
 static void glVertexAttrib2f_sfp_log(uint32_t idx, uint32_t fb0, uint32_t fb1) {
@@ -649,116 +527,6 @@ static void glVertexAttrib4f_sfp_log(uint32_t idx, uint32_t fb0, uint32_t fb1, u
         l_info("[gl_dbg] glVertexAttrib4f(idx=%u, %f, %f, %f, %f)", idx, v0, v1, v2, v3);
     }
     glVertexAttrib4f(idx, v0, v1, v2, v3);
-}
-
-/* void glVertexAttrib4f(GLuint idx, GLfloat v0, GLfloat v1, GLfloat v2, GLfloat v3)
- * 5 args: idx in r0, v0-v2 in r1-r3, v3 on stack */
-__attribute__((naked)) static void glVertexAttrib4f_sfp(void) {
-    __asm__ volatile(
-        "vmov s0, r1\n"
-        "vmov s1, r2\n"
-        "vmov s2, r3\n"
-        "ldr r1, [sp]\n"
-        "vmov s3, r1\n"
-        "b glVertexAttrib4f\n"
-    );
-}
-
-/* void glAlphaFunc(GLenum func, GLfloat ref) — int, float in r1 */
-__attribute__((naked)) static void glAlphaFunc_sfp(void) {
-    __asm__ volatile(
-        "vmov s0, r1\n"
-        "b glAlphaFunc\n"
-    );
-}
-
-/* void glTexParameterf(GLenum target, GLenum pname, GLfloat param) */
-__attribute__((naked)) static void glTexParameterf_sfp(void) {
-    __asm__ volatile(
-        "vmov s0, r2\n"
-        "b glTexParameterf\n"
-    );
-}
-
-/* void glPointSize(GLfloat size) */
-__attribute__((naked)) static void glPointSize_sfp(void) {
-    __asm__ volatile(
-        "vmov s0, r0\n"
-        "b glPointSize\n"
-    );
-}
-
-/* void glFogf(GLenum pname, GLfloat param) — int in r0, float in r1 */
-__attribute__((naked)) static void glFogf_sfp(void) {
-    __asm__ volatile(
-        "vmov s0, r1\n"
-        "b glFogf\n"
-    );
-}
-
-/* void glTranslatef(GLfloat x, GLfloat y, GLfloat z) — 3 floats */
-__attribute__((naked)) static void glTranslatef_sfp(void) {
-    __asm__ volatile(
-        "vmov s0, r0\n"
-        "vmov s1, r1\n"
-        "vmov s2, r2\n"
-        "b glTranslatef\n"
-    );
-}
-
-/* glBlendColor — not exported by vitaGL, stubbed as ret0 in table */
-
-/* void glRotatef(GLfloat angle, GLfloat x, GLfloat y, GLfloat z) — 4 floats */
-__attribute__((naked)) static void glRotatef_sfp(void) {
-    __asm__ volatile(
-        "vmov s0, r0\n"
-        "vmov s1, r1\n"
-        "vmov s2, r2\n"
-        "vmov s3, r3\n"
-        "b glRotatef\n"
-    );
-}
-
-/* void glScalef(GLfloat x, GLfloat y, GLfloat z) — 3 floats */
-__attribute__((naked)) static void glScalef_sfp(void) {
-    __asm__ volatile(
-        "vmov s0, r0\n"
-        "vmov s1, r1\n"
-        "vmov s2, r2\n"
-        "b glScalef\n"
-    );
-}
-
-/* void glOrthof(GLfloat l, GLfloat r, GLfloat b, GLfloat t, GLfloat n, GLfloat f)
- * — 6 floats: r0-r3 + stack[0], stack[1] */
-__attribute__((naked)) static void glOrthof_sfp(void) {
-    __asm__ volatile(
-        "vmov s0, r0\n"
-        "vmov s1, r1\n"
-        "vmov s2, r2\n"
-        "vmov s3, r3\n"
-        "ldr r0, [sp, #0]\n"
-        "ldr r1, [sp, #4]\n"
-        "vmov s4, r0\n"
-        "vmov s5, r1\n"
-        "b glOrthof\n"
-    );
-}
-
-/* void glFrustumf(GLfloat l, GLfloat r, GLfloat b, GLfloat t, GLfloat n, GLfloat f)
- * — 6 floats: r0-r3 + stack[0], stack[1] */
-__attribute__((naked)) static void glFrustumf_sfp(void) {
-    __asm__ volatile(
-        "vmov s0, r0\n"
-        "vmov s1, r1\n"
-        "vmov s2, r2\n"
-        "vmov s3, r3\n"
-        "ldr r0, [sp, #0]\n"
-        "ldr r1, [sp, #4]\n"
-        "vmov s4, r0\n"
-        "vmov s5, r1\n"
-        "b glFrustumf\n"
-    );
 }
 
 /* Generate all wrappers */
@@ -1579,7 +1347,7 @@ so_default_dynlib default_dynlib[] = {
 #else
         { "glActiveTexture", (uintptr_t)&glActiveTexture },
 #endif
-        { "glAlphaFunc", (uintptr_t)&glAlphaFunc_sfp },
+        { "glAlphaFunc", (uintptr_t)&glAlphaFunc },
         { "glAlphaFuncx", (uintptr_t)&glAlphaFuncx },
         { "glAttachShader", (uintptr_t)&glAttachShader_soloader },
 #ifdef DEBUG_OPENGL
@@ -1624,15 +1392,15 @@ so_default_dynlib default_dynlib[] = {
 #else
         { "glClear", (uintptr_t)&glClear },
 #endif
-        { "glClearColor", (uintptr_t)&glClearColor_sfp },
+        { "glClearColor", (uintptr_t)&glClearColor },
         { "glClearColorx", (uintptr_t)&glClearColorx },
-        { "glClearDepthf", (uintptr_t)&glClearDepthf_sfp },
+        { "glClearDepthf", (uintptr_t)&glClearDepthf },
         { "glClearDepthx", (uintptr_t)&glClearDepthx },
         { "glClearStencil", (uintptr_t)&glClearStencil },
         { "glClientActiveTexture", (uintptr_t)&glClientActiveTexture },
         { "glClipPlanef", (uintptr_t)&glClipPlanef },
         { "glClipPlanex", (uintptr_t)&glClipPlanex },
-        { "glColor4f", (uintptr_t)&glColor4f_sfp },
+        { "glColor4f", (uintptr_t)&glColor4f },
         { "glColor4ub", (uintptr_t)&glColor4ub },
         { "glColor4x", (uintptr_t)&glColor4x },
         { "glColorMask", (uintptr_t)&glColorMask_vita3k },
@@ -1661,7 +1429,7 @@ so_default_dynlib default_dynlib[] = {
         { "glDeleteTextures", (uintptr_t)&glDeleteTextures },
         { "glDepthFunc", (uintptr_t)&glDepthFunc },
         { "glDepthMask", (uintptr_t)&glDepthMask },
-        { "glDepthRangef", (uintptr_t)&glDepthRangef_sfp },
+        { "glDepthRangef", (uintptr_t)&glDepthRangef },
         { "glDepthRangex", (uintptr_t)&glDepthRangex },
         { "glDetachShader", (uintptr_t)&ret0 },
         { "glDisable", (uintptr_t)&glDisable },
@@ -1700,7 +1468,7 @@ so_default_dynlib default_dynlib[] = {
 #endif
         { "glFinish", (uintptr_t)&glFinish },
         { "glFlush", (uintptr_t)&glFlush },
-        { "glFogf", (uintptr_t)&glFogf_sfp },
+        { "glFogf", (uintptr_t)&glFogf },
         { "glFogfv", (uintptr_t)&glFogfv },
         { "glFogx", (uintptr_t)&glFogx },
         { "glFogxv", (uintptr_t)&glFogxv },
@@ -1719,7 +1487,7 @@ so_default_dynlib default_dynlib[] = {
         { "glFramebufferTexture2DOES", (uintptr_t)&glFramebufferTexture2D },
 #endif
         { "glFrontFace", (uintptr_t)&glFrontFace },
-        { "glFrustumf", (uintptr_t)&glFrustumf_sfp },
+        { "glFrustumf", (uintptr_t)&glFrustumf },
         { "glFrustumx", (uintptr_t)&glFrustumx },
         { "glGenBuffers", (uintptr_t)&glGenBuffers },
         { "glGenerateMipmap", (uintptr_t)&glGenerateMipmap },
@@ -1794,7 +1562,7 @@ so_default_dynlib default_dynlib[] = {
         { "glLightModelxv", (uintptr_t)&glLightModelxv },
         { "glLightx", (uintptr_t)&ret0 },
         { "glLightxv", (uintptr_t)&glLightxv },
-        { "glLineWidth", (uintptr_t)&glLineWidth_sfp },
+        { "glLineWidth", (uintptr_t)&glLineWidth },
         { "glLineWidthx", (uintptr_t)&glLineWidthx },
         { "glLinkProgram", (uintptr_t)&glLinkProgram_soloader },
         { "glLoadIdentity", (uintptr_t)&glLoadIdentity },
@@ -1817,17 +1585,17 @@ so_default_dynlib default_dynlib[] = {
         { "glNormal3f", (uintptr_t)&glNormal3f },
         { "glNormal3x", (uintptr_t)&glNormal3x },
         { "glNormalPointer", (uintptr_t)&glNormalPointer },
-        { "glOrthof", (uintptr_t)&glOrthof_sfp },
+        { "glOrthof", (uintptr_t)&glOrthof },
         { "glOrthox", (uintptr_t)&glOrthox },
         { "glPixelStorei", (uintptr_t)&glPixelStorei },
         { "glPointParameterf", (uintptr_t)&ret0 },
         { "glPointParameterfv", (uintptr_t)&ret0 },
         { "glPointParameterx", (uintptr_t)&ret0 },
         { "glPointParameterxv", (uintptr_t)&ret0 },
-        { "glPointSize", (uintptr_t)&glPointSize_sfp },
+        { "glPointSize", (uintptr_t)&glPointSize },
         { "glPointSizePointerOES", (uintptr_t)&ret0 },
         { "glPointSizex", (uintptr_t)&glPointSizex },
-        { "glPolygonOffset", (uintptr_t)&glPolygonOffset_sfp },
+        { "glPolygonOffset", (uintptr_t)&glPolygonOffset },
         { "glPolygonOffsetx", (uintptr_t)&glPolygonOffsetx },
         { "glPopMatrix", (uintptr_t)&glPopMatrix },
         { "glPushMatrix", (uintptr_t)&glPushMatrix },
@@ -1840,11 +1608,11 @@ so_default_dynlib default_dynlib[] = {
         { "glRenderbufferStorage", (uintptr_t)&glRenderbufferStorage },
         { "glRenderbufferStorageOES", (uintptr_t)&glRenderbufferStorage },
 #endif
-        { "glRotatef", (uintptr_t)&glRotatef_sfp },
+        { "glRotatef", (uintptr_t)&glRotatef },
         { "glRotatex", (uintptr_t)&glRotatex },
         { "glSampleCoverage", (uintptr_t)&ret0 },
         { "glSampleCoveragex", (uintptr_t)&ret0 },
-        { "glScalef", (uintptr_t)&glScalef_sfp },
+        { "glScalef", (uintptr_t)&glScalef },
         { "glScalex", (uintptr_t)&glScalex },
         { "glScissor", (uintptr_t)&glScissor },
         { "glShadeModel", (uintptr_t)&glShadeModel },
@@ -1855,7 +1623,7 @@ so_default_dynlib default_dynlib[] = {
         { "glStencilOp", (uintptr_t)&glStencilOp },
         { "glStencilOpSeparate", (uintptr_t)&glStencilOpSeparate },
         { "glTexCoordPointer", (uintptr_t)&glTexCoordPointer },
-        { "glTexEnvf", (uintptr_t)&glTexEnvf_sfp },
+        { "glTexEnvf", (uintptr_t)&glTexEnvf },
         { "glTexEnvfv", (uintptr_t)&glTexEnvfv },
         { "glTexEnvi", (uintptr_t)&glTexEnvi },
         { "glTexEnviv", (uintptr_t)&ret0 },
@@ -1868,16 +1636,16 @@ so_default_dynlib default_dynlib[] = {
         { "glTexGenxOES", (uintptr_t)&ret0 },
         { "glTexGenxvOES", (uintptr_t)&ret0 },
         { "glTexImage2D", (uintptr_t)&glTexImage2D },
-        { "glTexParameterf", (uintptr_t)&glTexParameterf_sfp },
+        { "glTexParameterf", (uintptr_t)&glTexParameterf },
         { "glTexParameterfv", (uintptr_t)&ret0 },
         { "glTexParameteri", (uintptr_t)&glTexParameteri },
         { "glTexParameteriv", (uintptr_t)&glTexParameteriv },
         { "glTexParameterx", (uintptr_t)&glTexParameterx },
         { "glTexParameterxv", (uintptr_t)&ret0 },
         { "glTexSubImage2D", (uintptr_t)&glTexSubImage2D },
-        { "glTranslatef", (uintptr_t)&glTranslatef_sfp },
+        { "glTranslatef", (uintptr_t)&glTranslatef },
         { "glTranslatex", (uintptr_t)&glTranslatex },
-        { "glUniform1f", (uintptr_t)&glUniform1f_sfp },
+        { "glUniform1f", (uintptr_t)&glUniform1f },
         { "glUniform1fv", (uintptr_t)&glUniform1fv },
 #ifdef DEBUG_OPENGL
         { "glUniform1i", (uintptr_t)&glUniform1i_hook },
@@ -1886,15 +1654,15 @@ so_default_dynlib default_dynlib[] = {
 #endif
         { "glUniform1iv", (uintptr_t)&glUniform1iv },
         { "glUniform2i", (uintptr_t)&glUniform2i },
-        { "glUniform2f", (uintptr_t)&glUniform2f_sfp },
+        { "glUniform2f", (uintptr_t)&glUniform2f },
         { "glUniform2fv", (uintptr_t)&glUniform2fv },
         { "glUniform2iv", (uintptr_t)&glUniform2iv },
         { "glUniform3i", (uintptr_t)&glUniform3i },
-        { "glUniform3f", (uintptr_t)&glUniform3f_sfp },
+        { "glUniform3f", (uintptr_t)&glUniform3f },
         { "glUniform3fv", (uintptr_t)&glUniform3fv },
         { "glUniform3iv", (uintptr_t)&glUniform3iv },
         { "glUniform4i", (uintptr_t)&glUniform4i },
-        { "glUniform4f", (uintptr_t)&glUniform4f_sfp },
+        { "glUniform4f", (uintptr_t)&glUniform4f },
         { "glUniform4fv", (uintptr_t)&glUniform4fv },
         { "glUniform4iv", (uintptr_t)&glUniform4iv },
         { "glUniformMatrix2fv", (uintptr_t)&glUniformMatrix2fv },
@@ -1917,12 +1685,12 @@ so_default_dynlib default_dynlib[] = {
         { "glVertexAttrib2f", (uintptr_t)&glVertexAttrib2f_sfp_log },
 #else
         { "glVertexAttrib1f", (uintptr_t)&glVertexAttrib1f_sfp_fix },
-        { "glVertexAttrib2f", (uintptr_t)&glVertexAttrib2f_sfp },
+        { "glVertexAttrib2f", (uintptr_t)&glVertexAttrib2f },
 #endif
 #ifdef DEBUG_OPENGL
         { "glVertexAttrib4f", (uintptr_t)&glVertexAttrib4f_sfp_log },
 #else
-        { "glVertexAttrib4f", (uintptr_t)&glVertexAttrib4f_sfp },
+        { "glVertexAttrib4f", (uintptr_t)&glVertexAttrib4f },
 #endif
         { "glVertexAttrib4fv", (uintptr_t)&glVertexAttrib4fv },
 #ifdef DEBUG_OPENGL

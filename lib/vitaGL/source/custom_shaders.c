@@ -2877,6 +2877,10 @@ inline void glUniform4f(GLint location, GLfloat v0, GLfloat v1, GLfloat v2, GLfl
 	int offs = 0;
 	uniform *u = (uniform *)getUniformFromPtr(location, &offs);
 
+	const GLfloat value[4] = {v0, v1, v2, v3};
+	if (!memcmp(&u->data[offs * 4], value, sizeof(value)))
+		return;
+
 	// Setting passed value to desired uniform
 	u->data[offs * 4] = v0;
 	u->data[offs * 4 + 1] = v1;
