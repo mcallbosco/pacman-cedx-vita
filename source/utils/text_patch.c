@@ -3,6 +3,33 @@
 #include <stdint.h>
 #include <string.h>
 
+/* Called on assembled, NUL-terminated GLSL before either shader-cache lookup.
+ * Keep source length unchanged and recognise all supported variants so a
+ * previously reduced asset can still select original quality. */
+int pmcedx_patch_motion_blur_shader(char *source, int samples) {
+    if (!source || !strstr(source, "u_ColorTexture") ||
+        !strstr(source, "gl_FragColor = basecol/totalFact;"))
+        return 0;
+
+    char *count = strstr(source, "const float SampNum = ");
+    char *weight = strstr(source, "float totalFact = ");
+    if (!count || !weight)
+        return 0;
+    count += strlen("const float SampNum = ");
+    weight += strlen("float totalFact = ");
+    if (!((strncmp(count, "8.0;", 4) == 0 && strncmp(weight, "4.5;", 4) == 0) ||
+          (strncmp(count, "4.0;", 4) == 0 && strncmp(weight, "2.5;", 4) == 0) ||
+          (strncmp(count, "2.0;", 4) == 0 && strncmp(weight, "1.5;", 4) == 0)))
+        return 0;
+
+    char selected = samples == 8 ? '8' : samples == 2 ? '2' : '4';
+    int changed = count[0] != selected;
+    count[0] = selected;
+    /* Weights sum to (sample count + 1) / 2; retain the original brightness. */
+    weight[0] = samples == 8 ? '4' : samples == 2 ? '1' : '2';
+    return changed;
+}
+
 static int ends_with(const char *s, const char *suffix) {
     if (!s || !suffix) return 0;
     size_t sl = strlen(s);

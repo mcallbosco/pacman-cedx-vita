@@ -1,5 +1,6 @@
 #include "game_perf.h"
 #include "logger.h"
+#include "settings.h"
 
 #include <so_util/so_util.h>
 #include <stdint.h>
@@ -78,6 +79,18 @@ void game_perf_install_hooks(void) {
         const uint16_t skip_unused_transform = 0xe02d;
         kuKernelCpuUnrestrictedMemcpy((void *)((addr & ~(uintptr_t)1) + 0x52),
                                      &skip_unused_transform, sizeof(skip_unused_transform));
+    }
+    if (setting_reduceGhostTrails) {
+        addr = checked_function("_ZN9newPacman12cOnGhostTask12OnModeNormalEv",
+                                0x230, 0xbdb30a78u);
+        if (addr) {
+            /* Increase the distance between body afterimages from 1 to 2.
+             * Keep CreateShadow's anchor updates and all movement logic.
+             * Thumb VMOV.F32 s2,#2.0 replaces VMOV.F32 s2,#1.0 at +0x204. */
+            const uint16_t spacing_two[] = {0xeeb0, 0x1a00};
+            kuKernelCpuUnrestrictedMemcpy((void *)((addr & ~(uintptr_t)1) + 0x204),
+                                         spacing_two, sizeof(spacing_two));
+        }
     }
     /* so_patch flushes the module's instruction cache after all hooks. */
 }

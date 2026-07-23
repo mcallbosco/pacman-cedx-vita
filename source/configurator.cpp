@@ -18,6 +18,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
+#include "utils/settings.h"
 
 #define CONFIG_FILE "ux0:data/pacmancedx/config.txt"
 #define CONFIG_DIR  "ux0:data/pacmancedx"
@@ -33,8 +34,10 @@ enum OptionIndex {
     OPT_MSAA = 0,
     OPT_BUILD_TYPE = 1,
     OPT_LOW_PERF = 2,
-    OPT_ALL_MISSIONS = 3,
-    OPT_DUMMY = 4,
+    OPT_MOTION_BLUR = 3,
+    OPT_GHOST_TRAILS = 4,
+    OPT_ALL_MISSIONS = 5,
+    OPT_DUMMY = 6,
     OPTION_COUNT
 };
 
@@ -44,6 +47,8 @@ enum OptionIndex {
 static int msaa_mode = MSAA_OFF;
 static int build_type = 0;       /* 0=release, 1=debug */
 static int low_performance = 0;  /* 0=off, 1=on */
+static int motion_blur_samples = 4;
+static int reduce_ghost_trails = 0;
 static int all_missions = 1;     /* 1=unlocked, 0=normal */
 static int dummy_setting = 0;    /* placeholder setting to demo scrolling */
 static bool dirty = false;
@@ -90,6 +95,8 @@ static void load_settings() {
     msaa_mode = MSAA_OFF;
     build_type = 0;
     low_performance = 0;
+    motion_blur_samples = 4;
+    reduce_ghost_trails = 0;
     all_missions = 1;
     dummy_setting = 0;
     FILE *f = fopen(CONFIG_FILE, "r");
@@ -107,6 +114,10 @@ static void load_settings() {
             build_type = (val == 0 || val == 1) ? val : 0;
         else if (strcmp(key, "setting_lowPerformance") == 0)
             low_performance = (val != 0) ? 1 : 0;
+        else if (strcmp(key, "setting_motionBlurSamples") == 0)
+            motion_blur_samples = settings_sanitize_motion_blur_samples(val);
+        else if (strcmp(key, "setting_reduceGhostTrails") == 0)
+            reduce_ghost_trails = (val != 0) ? 1 : 0;
         else if (strcmp(key, "setting_accessAllMissions") == 0)
             all_missions = (val != 0) ? 1 : 0;
         else if (strcmp(key, "setting_dummy") == 0)
@@ -131,6 +142,8 @@ static void save_settings() {
     fprintf(f, "setting_msaaMode %d\n", sanitize_msaa(msaa_mode));
     fprintf(f, "setting_buildType %d\n", (build_type == 0 || build_type == 1) ? build_type : 0);
     fprintf(f, "setting_lowPerformance %d\n", low_performance ? 1 : 0);
+    fprintf(f, "setting_motionBlurSamples %d\n", settings_sanitize_motion_blur_samples(motion_blur_samples));
+    fprintf(f, "setting_reduceGhostTrails %d\n", reduce_ghost_trails ? 1 : 0);
     fprintf(f, "setting_accessAllMissions %d\n", all_missions ? 1 : 0);
     fprintf(f, "setting_dummy %d\n", dummy_setting ? 1 : 0);
     fclose(f);
@@ -190,6 +203,9 @@ static void render_frame() {
         {"MSAA ANTI-ALIASING",    msaa_to_string(msaa_mode)},
         {"BUILD TYPE",            build_type ? "DEBUG" : "RELEASE"},
         {"LOW PERFORMANCE MODE",  low_performance ? "ON" : "OFF"},
+        {"MOTION BLUR SAMPLES",    motion_blur_samples == 8 ? "8 (ORIGINAL)" :
+                                  motion_blur_samples == 2 ? "2 (FASTEST)" : "4 (FASTER)"},
+        {"GHOST AFTERIMAGES",      reduce_ghost_trails ? "REDUCED" : "FULL"},
         {"UNLOCK ALL MISSIONS",   all_missions ? "ON" : "OFF"},
         {"DUMMY SETTING",         dummy_setting ? "ON" : "OFF"},
     };
@@ -271,6 +287,17 @@ static void cycle_option(int idx, int direction) {
             break;
         case OPT_LOW_PERF:
             low_performance = low_performance ? 0 : 1;
+            dirty = true;
+            break;
+        case OPT_MOTION_BLUR:
+            if (direction > 0)
+                motion_blur_samples = motion_blur_samples == 2 ? 4 : motion_blur_samples == 4 ? 8 : 2;
+            else
+                motion_blur_samples = motion_blur_samples == 8 ? 4 : motion_blur_samples == 4 ? 2 : 8;
+            dirty = true;
+            break;
+        case OPT_GHOST_TRAILS:
+            reduce_ghost_trails = reduce_ghost_trails ? 0 : 1;
             dirty = true;
             break;
         case OPT_ALL_MISSIONS:

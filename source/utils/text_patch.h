@@ -4,5 +4,6 @@
 #include <stddef.h>
 
 int pmcedx_patch_text_asset(const char *path, void *data, size_t len);
+int pmcedx_patch_motion_blur_shader(char *source, int samples);
 
 #endif
