@@ -30,7 +30,7 @@ extern bool setting_sampleSetting2;
 extern int  setting_msaaMode;
 extern int  setting_buildType;       /* 0=release, 1=debug/dev */
 extern bool setting_lowPerformance;  /* true = tell game this is weak HW */
-extern bool setting_accessAllMissions; /* true = unlock all missions */
+extern bool setting_unlockAllContent; /* true = bypass content access checks */
 extern int setting_motionBlurSamples; /* 2/4 = reduced, 8 = original */
 extern bool setting_reduceGhostTrails;
 

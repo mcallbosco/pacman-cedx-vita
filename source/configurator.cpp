@@ -36,7 +36,7 @@ enum OptionIndex {
     OPT_LOW_PERF = 2,
     OPT_MOTION_BLUR = 3,
     OPT_GHOST_TRAILS = 4,
-    OPT_ALL_MISSIONS = 5,
+    OPT_ALL_CONTENT = 5,
     OPT_DUMMY = 6,
     OPTION_COUNT
 };
@@ -49,7 +49,7 @@ static int build_type = 0;       /* 0=release, 1=debug */
 static int low_performance = 0;  /* 0=off, 1=on */
 static int motion_blur_samples = 4;
 static int reduce_ghost_trails = 0;
-static int all_missions = 1;     /* 1=unlocked, 0=normal */
+static int all_content = 1;     /* 1=unlocked, 0=normal */
 static int dummy_setting = 0;    /* placeholder setting to demo scrolling */
 static bool dirty = false;
 
@@ -97,7 +97,7 @@ static void load_settings() {
     low_performance = 0;
     motion_blur_samples = 4;
     reduce_ghost_trails = 0;
-    all_missions = 1;
+    all_content = 1;
     dummy_setting = 0;
     FILE *f = fopen(CONFIG_FILE, "r");
     if (!f) {
@@ -118,14 +118,14 @@ static void load_settings() {
             motion_blur_samples = settings_sanitize_motion_blur_samples(val);
         else if (strcmp(key, "setting_reduceGhostTrails") == 0)
             reduce_ghost_trails = (val != 0) ? 1 : 0;
-        else if (strcmp(key, "setting_accessAllMissions") == 0)
-            all_missions = (val != 0) ? 1 : 0;
+        else if (strcmp(key, "setting_unlockAllContent") == 0 || strcmp(key, "setting_accessAllMissions") == 0)
+            all_content = (val != 0) ? 1 : 0;
         else if (strcmp(key, "setting_dummy") == 0)
             dummy_setting = (val != 0) ? 1 : 0;
     }
     fclose(f);
-    log_line("load_settings: msaa=%d build_type=%d low_perf=%d all_missions=%d dummy=%d",
-             msaa_mode, build_type, low_performance, all_missions, dummy_setting);
+    log_line("load_settings: msaa=%d build_type=%d low_perf=%d all_content=%d dummy=%d",
+             msaa_mode, build_type, low_performance, all_content, dummy_setting);
 }
 
 static void save_settings() {
@@ -144,11 +144,11 @@ static void save_settings() {
     fprintf(f, "setting_lowPerformance %d\n", low_performance ? 1 : 0);
     fprintf(f, "setting_motionBlurSamples %d\n", settings_sanitize_motion_blur_samples(motion_blur_samples));
     fprintf(f, "setting_reduceGhostTrails %d\n", reduce_ghost_trails ? 1 : 0);
-    fprintf(f, "setting_accessAllMissions %d\n", all_missions ? 1 : 0);
+    fprintf(f, "setting_unlockAllContent %d\n", all_content ? 1 : 0);
     fprintf(f, "setting_dummy %d\n", dummy_setting ? 1 : 0);
     fclose(f);
-    log_line("save_settings: wrote msaa=%d build_type=%d low_perf=%d all_missions=%d dummy=%d",
-             msaa_mode, build_type, low_performance, all_missions, dummy_setting);
+    log_line("save_settings: wrote msaa=%d build_type=%d low_perf=%d all_content=%d dummy=%d",
+             msaa_mode, build_type, low_performance, all_content, dummy_setting);
 }
 
 static bool pressed(uint32_t now, uint32_t prev, uint32_t button) {
@@ -206,7 +206,7 @@ static void render_frame() {
         {"MOTION BLUR SAMPLES",    motion_blur_samples == 8 ? "8 (ORIGINAL)" :
                                   motion_blur_samples == 2 ? "2 (FASTEST)" : "4 (FASTER)"},
         {"GHOST AFTERIMAGES",      reduce_ghost_trails ? "REDUCED" : "FULL"},
-        {"UNLOCK ALL MISSIONS",   all_missions ? "ON" : "OFF"},
+        {"UNLOCK ALL CONTENT",   all_content ? "ON" : "OFF"},
         {"DUMMY SETTING",         dummy_setting ? "ON" : "OFF"},
     };
 
@@ -300,8 +300,8 @@ static void cycle_option(int idx, int direction) {
             reduce_ghost_trails = reduce_ghost_trails ? 0 : 1;
             dirty = true;
             break;
-        case OPT_ALL_MISSIONS:
-            all_missions = all_missions ? 0 : 1;
+        case OPT_ALL_CONTENT:
+            all_content = all_content ? 0 : 1;
             dirty = true;
             break;
         case OPT_DUMMY:

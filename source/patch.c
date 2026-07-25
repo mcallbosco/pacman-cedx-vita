@@ -28,6 +28,8 @@ extern so_module fmod_mod;
 #include "utils/logger.h"
 #include "utils/pgxt.h"
 #include "utils/game_perf.h"
+#include "utils/game_patch.h"
+#include "utils/settings.h"
 #include <stdbool.h>
 
 static int ret0(void) { return 0; }
@@ -499,6 +501,52 @@ static void patch_fmod_invalid_handle_guard(void) {
     l_info("Patched FMOD invalid-handle guard at +0x209cc/+0x209ce.");
 }
 
+static uintptr_t earned_lock_caller;
+static void *(*content_get_course)(void *model, int world, int level);
+static int (*content_get_saved_lock)(const void *course);
+
+static int level_access_is_locked(void *model, int world, int level) {
+    /* The achievement checker shares the menu's query. It must still observe
+     * saved progress. Its return address is covered by the signature below. */
+    uintptr_t caller = (uintptr_t)__builtin_return_address(0) & ~(uintptr_t)1;
+    if (caller == earned_lock_caller)
+        return content_get_saved_lock(content_get_course(model, world, level));
+    return 0;
+}
+
+/* Access overrides only: keep the saved lock flags, completion status and
+ * score data intact so disabling the setting restores normal progression. */
+static void install_content_unlocks(void) {
+    if (!setting_unlockAllContent)
+        return;
+
+    uintptr_t level = game_patch_checked_function(
+        "_ZN6pmcedx9GameModel13IsLevelLockedEii", 0x32, 0x78137158u);
+    uintptr_t settings = game_patch_checked_function(
+        "_ZN6pmcedx33SelectLevelSettingsScreen_Premium5SetupEii",
+        0x390, 0xe65de760u);
+    uintptr_t achievement = game_patch_checked_function(
+        "_ZN9newPacman17cGameScoreManager32CheckUnlockAllCoursesAchievementEv",
+        0xa4, 0x7dacda25u);
+    content_get_course = (void *)so_symbol(&so_mod,
+        "_ZN6pmcedx9GameModel14GetCourseParamEii");
+    content_get_saved_lock = (void *)so_symbol(&so_mod,
+        "_ZNK9newPacman12cCourseParam7GetLockEv");
+    /* Install together; an unsupported game library retains normal access. */
+    if (!level || !settings || !achievement ||
+        !content_get_course || !content_get_saved_lock)
+        return;
+
+    earned_lock_caller = (achievement & ~(uintptr_t)1) + 0x60;
+    hook_addr(level, (uintptr_t)level_access_is_locked);
+    /* Setup enables the time-trial variant selector only for play status 3.
+     * NOP its local BNE at +0x76 so the selector is available from the start.
+     * Keep the mode-specific selector table and saved play status unchanged. */
+    const uint16_t nop = 0xbf00;
+    kuKernelCpuUnrestrictedMemcpy((void *)((settings & ~(uintptr_t)1) + 0x76),
+                                 &nop, sizeof(nop));
+}
+
 void so_patch(void) {
     patch_fmod_invalid_handle_guard();
     install_fmod_api_hooks();
@@ -561,6 +609,7 @@ void so_patch(void) {
      * per-pixel CPU decode. Expected win: ~10–15 s of startup → ~1–2 s. */
     pgxt_install_hooks();
     game_perf_install_hooks();
+    install_content_unlocks();
     so_flush_caches(&so_mod);
 
     l_info("Patches applied.");

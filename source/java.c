@@ -540,7 +540,7 @@ static jboolean fh_IsTrial(jmethodID id, va_list args) {
 }
 
 static jboolean fh_AccessEveryMission(jmethodID id, va_list args) {
-    return setting_accessAllMissions ? JNI_TRUE : JNI_FALSE;
+    return setting_unlockAllContent ? JNI_TRUE : JNI_FALSE;
 }
 
 /* --- RateMeManager --- */

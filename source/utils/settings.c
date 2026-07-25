@@ -17,7 +17,7 @@ bool setting_sampleSetting2;
 int  setting_msaaMode;
 int  setting_buildType;
 bool setting_lowPerformance;
-bool setting_accessAllMissions;
+bool setting_unlockAllContent;
 int setting_motionBlurSamples;
 bool setting_reduceGhostTrails;
 
@@ -44,7 +44,7 @@ void settings_reset() {
     setting_msaaMode       = SETTING_MSAA_OFF;
     setting_buildType      = 0;
     setting_lowPerformance = false;
-    setting_accessAllMissions = true;
+    setting_unlockAllContent = true;
     setting_motionBlurSamples = 4;
     setting_reduceGhostTrails = false;
 }
@@ -64,7 +64,8 @@ void settings_load() {
             else if (strcmp("setting_msaaMode", buffer) == 0)       setting_msaaMode = settings_sanitize_msaa_mode(value);
             else if (strcmp("setting_buildType", buffer) == 0)      setting_buildType = (value == 0 || value == 1) ? value : 0;
             else if (strcmp("setting_lowPerformance", buffer) == 0) setting_lowPerformance = (bool)value;
-            else if (strcmp("setting_accessAllMissions", buffer) == 0) setting_accessAllMissions = (bool)value;
+            else if (strcmp("setting_unlockAllContent", buffer) == 0 ||
+                     strcmp("setting_accessAllMissions", buffer) == 0) setting_unlockAllContent = (bool)value;
             else if (strcmp("setting_motionBlurSamples", buffer) == 0) setting_motionBlurSamples = settings_sanitize_motion_blur_samples(value);
             else if (strcmp("setting_reduceGhostTrails", buffer) == 0) setting_reduceGhostTrails = (bool)value;
         }
@@ -83,7 +84,7 @@ void settings_save() {
         fprintf(config, "%s %d\n", "setting_msaaMode", settings_sanitize_msaa_mode(setting_msaaMode));
         fprintf(config, "%s %d\n", "setting_buildType", (setting_buildType == 0 || setting_buildType == 1) ? setting_buildType : 0);
         fprintf(config, "%s %d\n", "setting_lowPerformance", (int)(setting_lowPerformance));
-        fprintf(config, "%s %d\n", "setting_accessAllMissions", (int)(setting_accessAllMissions));
+        fprintf(config, "%s %d\n", "setting_unlockAllContent", (int)(setting_unlockAllContent));
         fprintf(config, "setting_motionBlurSamples %d\n", settings_sanitize_motion_blur_samples(setting_motionBlurSamples));
         fprintf(config, "setting_reduceGhostTrails %d\n", (int)setting_reduceGhostTrails);
         fclose(config);
