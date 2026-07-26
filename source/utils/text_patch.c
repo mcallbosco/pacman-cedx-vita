@@ -1,6 +1,7 @@
 #include "utils/text_patch.h"
 
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* Called on assembled, NUL-terminated GLSL before either shader-cache lookup.
@@ -28,6 +29,71 @@ int pmcedx_patch_motion_blur_shader(char *source, int samples) {
     /* Weights sum to (sample count + 1) / 2; retain the original brightness. */
     weight[0] = samples == 8 ? '4' : samples == 2 ? '1' : '2';
     return changed;
+}
+
+static char *replace_shader_block(const char *source, const char *from, const char *to) {
+    const char *match = strstr(source, from);
+    if (!match)
+        return NULL;
+    size_t length = strlen(source), from_length = strlen(from), to_length = strlen(to);
+    if (to_length > SIZE_MAX - (length - from_length) - 1)
+        return NULL;
+    char *result = malloc(length - from_length + to_length + 1);
+    if (!result)
+        return NULL;
+    size_t prefix = (size_t)(match - source);
+    memcpy(result, source, prefix);
+    memcpy(result + prefix, to, to_length);
+    memcpy(result + prefix + to_length, match + from_length,
+           length - prefix - from_length + 1);
+    return result;
+}
+
+char *pmcedx_optimize_map_shader(const char *source) {
+    if (!source || !strstr(source, "uniform sampler2D u_diffuseMap2;"))
+        return NULL;
+
+    static const char blend[] =
+        "\tvec4 base = texture2D( u_diffuseMap, v_oTexCoord );\n"
+        "\tvec4 voColor = v_oColor;\n"
+        "\tif(voColor.a<1.0)\n"
+        "\t{\n"
+        "\t    vec4 subColor = texture2D( u_diffuseMap2, v_oTexCoord2 );\n"
+        "\t    base = base*(voColor.a) + subColor*(1.0 - voColor.a);\n"
+        "\t    voColor.a = 1.0;\n"
+        "\t}\n";
+    static const char blend_optimized[] =
+        "\tvec4 base;\n"
+        "\tvec4 voColor = v_oColor;\n"
+        "\tif(voColor.a == 0.0) {\n"
+        "\t    base = texture2D(u_diffuseMap2, v_oTexCoord2);\n"
+        "\t    voColor.a = 1.0;\n"
+        "\t} else {\n"
+        "\t    base = texture2D(u_diffuseMap, v_oTexCoord);\n"
+        "\t    if(voColor.a < 1.0) {\n"
+        "\t        vec4 subColor = texture2D(u_diffuseMap2, v_oTexCoord2);\n"
+        "\t        base = base*voColor.a + subColor*(1.0 - voColor.a);\n"
+        "\t        voColor.a = 1.0;\n"
+        "\t    }\n"
+        "\t}\n";
+    char *result = replace_shader_block(source, blend, blend_optimized);
+    if (!result)
+        return NULL;
+
+    static const char tint[] = "\n    if(u_spDeltaHSV.w < 1.5)\n";
+    static const char tint_optimized[] =
+        "\n    if(u_spDeltaHSV.w < 1.5 && u_spDeltaHSV.x == 0.0)\n"
+        "    {\n"
+        "        oColor = base*voColor;\n"
+        "        oColor.xyz = min(oColor.xyz*u_spDeltaHSV.z, vec3(1.0));\n"
+        "    }\n"
+        "    else if(u_spDeltaHSV.w < 1.5)\n";
+    char *with_tint = replace_shader_block(result, tint, tint_optimized);
+    if (with_tint) {
+        free(result);
+        result = with_tint;
+    }
+    return result;
 }
 
 static int ends_with(const char *s, const char *suffix) {

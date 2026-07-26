@@ -225,6 +225,12 @@ void glShaderSource_soloader(GLuint shader, GLsizei count,
     }
     str[clean_len] = '\0';
     pmcedx_patch_motion_blur_shader(str, setting_motionBlurSamples);
+    char *optimized_map = pmcedx_optimize_map_shader(str);
+    if (optimized_map) {
+        free(str);
+        str = optimized_map;
+        clean_len = strlen(str);
+    }
     track_shader_source(shader, str, clean_len);
 
     l_info("glShaderSource: shader=%u, len=%u, first4bytes=[%02x %02x %02x %02x]",

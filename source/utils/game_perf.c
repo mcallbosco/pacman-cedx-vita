@@ -14,15 +14,33 @@ static so_hook train_index_hook;
  * the train can be reordered or reallocated without changing its size. */
 static void ***train_list;
 
-static int train_ghost_index(void *ghost) {
+static void **find_train_ghost(void *ghost) {
     void **begin = train_list[0];
     void **end = train_list[1];
     for (void **it = begin; it != end; ++it) {
         if (*it == ghost)
-            return (int)(it - begin);
+            return it;
     }
+    return NULL;
+}
+
+static int train_ghost_index(void *ghost) {
+    void **entry = find_train_ghost(ghost);
+    if (entry)
+        return (int)(entry - train_list[0]);
     /* Preserve the game's assertion path for a ghost outside the train. */
     return SO_CONTINUE(int, train_index_hook, ghost);
+}
+
+static int is_train_ghost(void *ghost) {
+    return find_train_ghost(ghost) != NULL;
+}
+
+static void *target_train_ghost(void *ghost) {
+    void **entry = find_train_ghost(ghost);
+    /* The train leader and ghosts outside the train have no predecessor.
+     * Read the live vector so removals and reordering are visible immediately. */
+    return entry && entry != train_list[0] ? entry[-1] : NULL;
 }
 
 /* Integer arguments preserve Android's soft-float calling convention and all
@@ -47,6 +65,16 @@ void game_perf_install_hooks(void) {
     train_list = (void ***)so_symbol(&so_mod, "_ZN9newPacman12cOnGhostTask10mTrainListE");
     if (addr && train_list)
         train_index_hook = hook_addr(addr, (uintptr_t)train_ghost_index);
+
+    addr = game_patch_checked_function("_ZN9newPacman12cOnGhostTask12isTrainGhostEPS0_",
+                                       0x70, 0x9f222769u);
+    if (addr && train_list)
+        hook_addr(addr, (uintptr_t)is_train_ghost);
+
+    addr = game_patch_checked_function("_ZN9newPacman12cOnGhostTask19getTargetTrainGhostEPS0_",
+                                       0xb8, 0x05e0dd79u);
+    if (addr && train_list)
+        hook_addr(addr, (uintptr_t)target_train_ghost);
 
     addr = game_patch_checked_function("_ZN3sys8ShEffect5ApplyEPNS_7cSpriteE",
                             0x1c4, 0xa91519f9u);
