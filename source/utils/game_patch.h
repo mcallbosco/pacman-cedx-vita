@@ -12,8 +12,8 @@ extern so_module so_mod;
  * armeabi-v7a library (Build ID 282a7990ef34572c6fdcea7913840b11feaca95e).
  * A different function body is left untouched. This is a version check, not an
  * integrity/security check. */
-static uintptr_t game_patch_checked_function(const char *symbol, size_t size, uint32_t hash) {
-    uintptr_t addr = so_symbol(&so_mod, symbol);
+static uintptr_t game_patch_checked_code(uintptr_t addr, const char *name,
+                                         size_t size, uint32_t hash) {
     uintptr_t code = addr & ~(uintptr_t)1;
     if (!(addr & 1) || code < so_mod.text_base || size > so_mod.text_size ||
         code - so_mod.text_base > so_mod.text_size - size)
@@ -24,10 +24,14 @@ static uintptr_t game_patch_checked_function(const char *symbol, size_t size, ui
     for (size_t i = 0; i < size; ++i)
         actual = (actual ^ bytes[i]) * 16777619u;
     if (actual != hash) {
-        l_warn("Native patch skipped: unexpected code for %s", symbol);
+        l_warn("Native patch skipped: unexpected code for %s", name);
         return 0;
     }
     return addr;
+}
+
+static uintptr_t game_patch_checked_function(const char *symbol, size_t size, uint32_t hash) {
+    return game_patch_checked_code(so_symbol(&so_mod, symbol), symbol, size, hash);
 }
 
 #endif
