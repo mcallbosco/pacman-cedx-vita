@@ -1,12 +1,15 @@
 #include "game_perf.h"
 #include "game_patch.h"
 #include "game_spacing.h"
+#include "game_transform.h"
+#include "game_tasks.h"
 #include "logger.h"
 #include "settings.h"
 
 #include <so_util/so_util.h>
 #include <stdint.h>
 #include <string.h>
+#include <arm_neon.h>
 
 extern so_module so_mod;
 
@@ -18,6 +21,26 @@ static void ***train_list;
 static void **find_train_ghost(void *ghost) {
     void **begin = train_list[0];
     void **end = train_list[1];
+    if (begin == end)
+        return NULL;
+    if (*begin == ghost)
+        return begin;
+    ++begin;
+    const uint32x4_t target = vdupq_n_u32((uint32_t)(uintptr_t)ghost);
+    /* Scan eight live entries at a time without reading beyond the vector.
+     * Resolve a matching block in order to preserve first-match semantics. */
+    while (end - begin >= 8) {
+        uint32x4_t a = vld1q_u32((const uint32_t *)begin);
+        uint32x4_t b = vld1q_u32((const uint32_t *)(begin + 4));
+        uint32x4_t matches = vorrq_u32(vceqq_u32(a, target), vceqq_u32(b, target));
+        uint32x2_t lanes = vorr_u32(vget_low_u32(matches), vget_high_u32(matches));
+        if (vget_lane_u32(vpmax_u32(lanes, lanes), 0)) {
+            for (size_t i = 0; i < 8; ++i)
+                if (begin[i] == ghost)
+                    return begin + i;
+        }
+        begin += 8;
+    }
     for (void **it = begin; it != end; ++it) {
         if (*it == ghost)
             return it;
@@ -134,5 +157,7 @@ void game_perf_install_hooks(void) {
     }
     game_spacing_install_hooks();
     reuse_sprite_corner_transforms();
+    game_transform_install_hooks();
+    game_tasks_install_hooks();
     /* so_patch flushes the module's instruction cache after all hooks. */
 }
