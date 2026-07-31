@@ -177,6 +177,9 @@ add_executable(${CMAKE_PROJECT_NAME}
                source/utils/game_spacing.c
                source/utils/game_transform.c
                source/utils/game_tasks.c
+               source/utils/game_area.c
+               source/utils/game_grid.c
+               source/utils/game_vertex.c
                source/utils/init.c
                source/utils/logger.c
                source/utils/pgxt.c

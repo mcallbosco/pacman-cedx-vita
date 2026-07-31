@@ -15,7 +15,7 @@ static float number(const void *object, size_t offset) {
 
 /* Android returns this nontrivial cVector2 through a hidden first pointer,
  * and passes the input vector by address. Keep the original rounding order
- * and native angle wrapping/trigonometry, replacing only matrix setup. */
+ * and native angle wrapping. Nonzero angles retain native trigonometry. */
 static void *sprite_conv_pos(void *result, const void *sprite,
                              const void *point, uint32_t unscaled) {
     float cx = number(sprite, 0x44) * number(sprite, 0x5c);
@@ -37,7 +37,14 @@ static void *sprite_conv_pos(void *result, const void *sprite,
         y *= number(sprite, 0x70);
     }
     float sine, cosine;
-    angle_sincos(angle_bits, &sine, &cosine);
+    /* Exact zero-angle results; retain the rotation arithmetic below for
+     * signed zero and exceptional coordinates. */
+    if (!(angle_bits & 0x7fffffffu)) {
+        sine = angle;
+        cosine = 1.0f;
+    } else {
+        angle_sincos(angle_bits, &sine, &cosine);
+    }
     float rx, ry;
     /* Match cMatrix44::Transform's non-fused VMLA operations exactly. C
      * contraction can otherwise turn (-sine)*y into -(sine*y), changing

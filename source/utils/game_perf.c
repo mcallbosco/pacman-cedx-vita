@@ -3,6 +3,9 @@
 #include "game_spacing.h"
 #include "game_transform.h"
 #include "game_tasks.h"
+#include "game_area.h"
+#include "game_grid.h"
+#include "game_vertex.h"
 #include "logger.h"
 #include "settings.h"
 
@@ -157,7 +160,10 @@ void game_perf_install_hooks(void) {
     }
     game_spacing_install_hooks();
     reuse_sprite_corner_transforms();
+    game_grid_install_hooks();
     game_transform_install_hooks();
     game_tasks_install_hooks();
+    game_area_install_hooks();
+    game_vertex_install_hooks();
     /* so_patch flushes the module's instruction cache after all hooks. */
 }
