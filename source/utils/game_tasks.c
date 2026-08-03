@@ -17,6 +17,26 @@ static void reset_refresh(void *task) {
     memcpy((char *)task + 20, &flags, sizeof(flags));
 }
 
+static void task_set_all_hide(void *task, uint32_t hide) {
+    uint32_t flags = word(task, 20);
+    flags = hide & 1 ? flags & ~4u : flags | 4u;
+    memcpy((char *)task + 20, &flags, sizeof(flags));
+    void *end = (char *)task + 8;
+    for (void *node = pointer(task, 12); node != end; node = pointer(node, 4))
+        task_set_all_hide(pointer(node, 8), hide);
+}
+
+static void install_task_visibility(void) {
+    uintptr_t hide = game_patch_checked_function(
+        "_ZN3sys5cTask10SetAllHideEb", 0xa0, 0xf7093952u);
+    if (hide &&
+        game_patch_checked_function("_ZN3sys5cTask7SetDrawEv", 0x16, 0x0933cb40u) &&
+        game_patch_checked_function("_ZN3sys5cTask9ResetDrawEv", 0x16, 0xc308a260u) &&
+        game_patch_checked_function("_ZN3sys5cTask17GetChildTaskBeginEv", 0x1c, 0x31ea37d6u) &&
+        game_patch_checked_function("_ZN3sys5cTask15GetChildTaskEndEv", 0x1c, 0xf94903a9u))
+        hook_addr(hide, (uintptr_t)task_set_all_hide);
+}
+
 static void call_task(void *task, size_t slot) {
     void (*callback)(void *) = pointer(pointer(task, 0), slot);
     callback(task);
@@ -58,6 +78,7 @@ static void task_execute(void *task, uint32_t children, uint32_t run_func,
 }
 
 void game_tasks_install_hooks(void) {
+    install_task_visibility();
     uintptr_t execute = game_patch_checked_function(
         "_ZN3sys5cTask7ExecuteEbbbb", 0x198, 0x726a7f2eu);
     uintptr_t refresh = game_patch_checked_function(

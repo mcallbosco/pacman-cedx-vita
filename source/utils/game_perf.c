@@ -7,6 +7,8 @@
 #include "game_grid.h"
 #include "game_vertex.h"
 #include "game_profile.h"
+#include "game_wave.h"
+#include "game_frame.h"
 #include "logger.h"
 #include "settings.h"
 
@@ -167,5 +169,7 @@ void game_perf_install_hooks(void) {
     game_area_install_hooks();
     game_vertex_install_hooks();
     game_profile_install_hooks();
+    game_wave_install_hooks();
+    game_frame_install_hooks();
     /* so_patch flushes the module's instruction cache after all hooks. */
 }
