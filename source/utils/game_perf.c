@@ -9,6 +9,7 @@
 #include "game_profile.h"
 #include "game_wave.h"
 #include "game_frame.h"
+#include "game_ghost_scan.h"
 #include "logger.h"
 #include "settings.h"
 
@@ -31,6 +32,9 @@ static void **find_train_ghost(void *ghost) {
         return NULL;
     if (*begin == ghost)
         return begin;
+    void **entry;
+    if (end - begin >= 64 && game_ghost_scan_train(train_list, ghost, &entry))
+        return entry;
     ++begin;
     const uint32x4_t target = vdupq_n_u32((uint32_t)(uintptr_t)ghost);
     /* Scan eight live entries at a time without reading beyond the vector.
@@ -117,6 +121,7 @@ static void reuse_sprite_corner_transforms(void) {
 }
 
 void game_perf_install_hooks(void) {
+    game_ghost_scan_install_hooks();
     uintptr_t addr = game_patch_checked_function("_ZN3sys7cSprite8SetColorEffff",
                                       0x8c, 0x78062d18u);
     if (addr)

@@ -1,5 +1,6 @@
 #include "game_tasks.h"
 #include "game_patch.h"
+#include "game_ghost_scan.h"
 #include <string.h>
 
 static uint32_t word(const void *object, size_t offset) {
@@ -39,7 +40,7 @@ static void install_task_visibility(void) {
 
 static void call_task(void *task, size_t slot) {
     void (*callback)(void *) = pointer(pointer(task, 0), slot);
-    callback(task);
+    game_ghost_scan_call(task, callback);
 }
 
 static void task_refresh(void *task) {
@@ -56,7 +57,7 @@ static void task_refresh(void *task) {
     }
 }
 
-static void task_execute(void *task, uint32_t children, uint32_t run_func,
+static void task_execute_impl(void *task, uint32_t children, uint32_t run_func,
                          uint32_t run_draw, uint32_t run_extra) {
     if (word(task, 20) & 0x40)
         return;
@@ -74,7 +75,14 @@ static void task_execute(void *task, uint32_t children, uint32_t run_func,
         return;
     void *end = (char *)task + 8;
     for (void *node = pointer(task, 12); node != end; node = pointer(node, 4))
-        task_execute(pointer(node, 8), 1, run_func & 1, run_draw & 1, run_extra & 1);
+        task_execute_impl(pointer(node, 8), 1, run_func & 1, run_draw & 1, run_extra & 1);
+}
+
+static void task_execute(void *task, uint32_t children, uint32_t run_func,
+                         uint32_t run_draw, uint32_t run_extra) {
+    game_ghost_scan_reset();
+    task_execute_impl(task, children, run_func, run_draw, run_extra);
+    game_ghost_scan_reset();
 }
 
 void game_tasks_install_hooks(void) {

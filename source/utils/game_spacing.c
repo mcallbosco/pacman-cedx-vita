@@ -1,5 +1,6 @@
 #include "game_spacing.h"
 #include "game_patch.h"
+#include "game_ghost_scan.h"
 #include <string.h>
 
 /* Preserve the game's float comparisons, division and rounding order. */
@@ -47,34 +48,46 @@ static int nearby(const void *a, const void *b, float limit, int same_direction)
     return 0;
 }
 
+/* 1 is the train multiplier, 2 the spacing divisor. Test the train rule first
+ * for a sibling which satisfies both, matching the original list traversal. */
+int game_spacing_rule(void *ghost, void *other, int *near_train) {
+    if ((((const unsigned char *)other)[0x1f8] & 1) &&
+        (nearby(other, ghost, 2.0f, 0) || nearby(ghost, other, 2.0f, 0))) {
+        *near_train = 1;
+        int32_t counter;
+        uint32_t bits = word(ghost, 0x118);
+        memcpy(&counter, &bits, sizeof(counter));
+        if ((float)counter > number(spacing_params, 0x198) * 60.0f)
+            return 1;
+    }
+    return nearby(other, ghost, 1.0f, 1) ? 2 : 0;
+}
+
 /* Replace only getSpeed's sibling scan. Keep its surrounding Pac-Man proximity,
  * train-following, power-up and slow-motion calculations in the original code. */
 static uint32_t __attribute__((used, noinline)) spacing_speed(void *ghost, uint32_t speed_bits) {
     float speed;
     memcpy(&speed, &speed_bits, sizeof(speed));
-    void *parent = (void *)(uintptr_t)word(ghost, 4);
-    void *end = child_end(parent);
     int near_train = 0;
-    for (void *node = child_begin(parent); node != end;
-         node = (void *)(uintptr_t)word(node, 4)) {
-        void *other = (void *)(uintptr_t)word(node, 8);
-        if (other == ghost)
-            continue;
-        if ((((const unsigned char *)other)[0x1f8] & 1) &&
-            (nearby(other, ghost, 2.0f, 0) || nearby(ghost, other, 2.0f, 0))) {
-            near_train = 1;
-            int32_t counter;
-            uint32_t bits = word(ghost, 0x118);
-            memcpy(&counter, &bits, sizeof(counter));
-            if ((float)counter > number(spacing_params, 0x198) * 60.0f) {
-                speed *= number(spacing_params, 0x278);
-                goto adjusted;
-            }
+    int rule = game_ghost_scan_spacing(ghost, &near_train);
+    if (rule < 0) {
+        void *parent = (void *)(uintptr_t)word(ghost, 4);
+        void *end = child_end(parent);
+        rule = 0;
+        for (void *node = child_begin(parent); node != end;
+             node = (void *)(uintptr_t)word(node, 4)) {
+            void *other = (void *)(uintptr_t)word(node, 8);
+            if (other != ghost && (rule = game_spacing_rule(ghost, other, &near_train)))
+                break;
         }
-        if (nearby(other, ghost, 1.0f, 1)) {
-            speed /= 1.5f;
-            goto adjusted;
-        }
+    }
+    if (rule == 1) {
+        speed *= number(spacing_params, 0x278);
+        goto adjusted;
+    }
+    if (rule == 2) {
+        speed /= 1.5f;
+        goto adjusted;
     }
     /* Early speed adjustments intentionally leave this counter unchanged. */
     uint32_t counter = near_train ? word(ghost, 0x118) + 1u : 0u;
