@@ -181,6 +181,7 @@ add_executable(${CMAKE_PROJECT_NAME}
                source/utils/game_area.c
                source/utils/game_grid.c
                source/utils/game_vertex.c
+               source/utils/game_batch.c
                source/utils/game_profile.c
                source/utils/game_wave.c
                source/utils/game_frame.c

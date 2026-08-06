@@ -467,6 +467,30 @@ static void glDrawArrays_fix(GLenum mode, GLint first, GLsizei count) {
     glDrawArrays(mode, first, count);
 }
 
+GLboolean gl_batch_can_index(GLsizei stride) {
+#ifdef DEBUG_OPENGL
+    /* Keep the instrumented build's original draw logging and inspection. */
+    return GL_FALSE;
+#else
+    /* A 32-byte draw under the map program can retain a separate, stale
+     * subtexture stream. Compact only when all of that program's vertex data
+     * belongs to the current 40-byte batch. */
+    return gl_current_program_fix != 0 &&
+           (gl_current_program_fix != 5 || stride == 40);
+#endif
+}
+
+void gl_draw_indexed_batch(GLuint index_buffer, GLsizei vertices) {
+    if (gl_current_program_fix == 5)
+        apply_prog5_attr_remap_fix();
+    GLint previous;
+    glGetIntegerv(GL_ELEMENT_ARRAY_BUFFER_BINDING, &previous);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, index_buffer);
+    glDrawRangeElements(GL_TRIANGLES, 0, vertices - 1, vertices / 4 * 6,
+                        GL_UNSIGNED_SHORT, NULL);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, previous);
+}
+
 /* Soft-float ABI bridge + prog5 a_ParamLight fix (non-debug path). */
 static void glVertexAttrib1f_sfp_fix(uint32_t idx, uint32_t float_bits) {
     float val;

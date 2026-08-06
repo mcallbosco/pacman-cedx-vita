@@ -10,6 +10,7 @@
 #include "game_wave.h"
 #include "game_frame.h"
 #include "game_ghost_scan.h"
+#include "game_batch.h"
 #include "logger.h"
 #include "settings.h"
 
@@ -172,6 +173,8 @@ void game_perf_install_hooks(void) {
     game_transform_install_hooks();
     game_tasks_install_hooks();
     game_area_install_hooks();
+    /* Batch guards inspect the original transform bodies before replacement. */
+    game_batch_install_hooks();
     game_vertex_install_hooks();
     game_profile_install_hooks();
     game_wave_install_hooks();
