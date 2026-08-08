@@ -174,6 +174,7 @@ add_executable(${CMAKE_PROJECT_NAME}
                source/utils/dialog.c
                source/utils/glutil.c
                source/utils/game_perf.c
+               source/utils/game_audio.c
                source/utils/game_spacing.c
                source/utils/game_ghost_scan.c
                source/utils/game_transform.c

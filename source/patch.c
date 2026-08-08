@@ -28,6 +28,7 @@ extern so_module fmod_mod;
 #include "utils/logger.h"
 #include "utils/pgxt.h"
 #include "utils/game_perf.h"
+#include "utils/game_audio.h"
 #include "utils/game_patch.h"
 #include "utils/settings.h"
 #include <stdbool.h>
@@ -352,6 +353,7 @@ static FMOD_RESULT fmod_system_play_sound_cpp_hook(void *system,
                                                    void **channel) {
     FMOD_RESULT ret = SO_CONTINUE(FMOD_RESULT, g_hook_fmod_sys_play_sound_cpp,
                                   system, sound, channel_group, paused, channel);
+    game_audio_log_play(sound, channel_group, ret, ret == 0 && channel ? *channel : NULL);
     g_fmod_play_sound_calls++;
     if (g_fmod_play_sound_calls <= 240 || ret != 0) {
         l_audio("[AUDIO][FMODAPI] System::playSound#%u this=%p sound=%p group=%p paused=%d ret=%d channel=%p",
@@ -362,6 +364,7 @@ static FMOD_RESULT fmod_system_play_sound_cpp_hook(void *system,
 }
 
 static FMOD_RESULT fmod_sound_release_cpp_hook(void *sound) {
+    game_audio_log_release(sound);
     FMOD_RESULT ret = SO_CONTINUE(FMOD_RESULT, g_hook_fmod_sound_release_cpp, sound);
     g_fmod_sound_release_calls++;
     if (g_fmod_sound_release_calls <= 240 || ret != 0) {
@@ -609,6 +612,7 @@ void so_patch(void) {
      * per-pixel CPU decode. Expected win: ~10–15 s of startup → ~1–2 s. */
     pgxt_install_hooks();
     game_perf_install_hooks();
+    game_audio_install_hooks();
     install_content_unlocks();
     so_flush_caches(&so_mod);
 
