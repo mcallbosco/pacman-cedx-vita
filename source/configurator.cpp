@@ -31,13 +31,14 @@ enum {
 };
 
 enum OptionIndex {
-    OPT_MSAA = 0,
-    OPT_BUILD_TYPE = 1,
-    OPT_LOW_PERF = 2,
-    OPT_MOTION_BLUR = 3,
-    OPT_GHOST_TRAILS = 4,
-    OPT_ALL_CONTENT = 5,
-    OPT_DUMMY = 6,
+    OPT_GAMEPLAY_SPEED = 0,
+    OPT_MSAA,
+    OPT_BUILD_TYPE,
+    OPT_LOW_PERF,
+    OPT_MOTION_BLUR,
+    OPT_GHOST_TRAILS,
+    OPT_ALL_CONTENT,
+    OPT_DUMMY,
     OPTION_COUNT
 };
 
@@ -45,6 +46,7 @@ enum OptionIndex {
 #define BUTTON_ROW OPTION_COUNT  /* selected_row value when focus is on buttons */
 
 static int msaa_mode = MSAA_OFF;
+static int pc_speed = 1;
 static int build_type = 0;       /* 0=release, 1=debug */
 static int low_performance = 0;  /* 0=off, 1=on */
 static int motion_blur_samples = 4;
@@ -92,6 +94,7 @@ static int sanitize_msaa(int mode) {
 }
 
 static void load_settings() {
+    pc_speed = 1;
     msaa_mode = MSAA_OFF;
     build_type = 0;
     low_performance = 0;
@@ -110,6 +113,8 @@ static void load_settings() {
     while (fscanf(f, "%63s %d\n", key, &val) == 2) {
         if (strcmp(key, "setting_msaaMode") == 0)
             msaa_mode = sanitize_msaa(val);
+        else if (strcmp(key, "setting_pcSpeed") == 0)
+            pc_speed = (val != 0) ? 1 : 0;
         else if (strcmp(key, "setting_buildType") == 0)
             build_type = (val == 0 || val == 1) ? val : 0;
         else if (strcmp(key, "setting_lowPerformance") == 0)
@@ -138,6 +143,7 @@ static void save_settings() {
     }
 
     fprintf(f, "setting_sampleSetting 1\n");
+    fprintf(f, "setting_pcSpeed %d\n", pc_speed ? 1 : 0);
     fprintf(f, "setting_sampleSetting2 1\n");
     fprintf(f, "setting_msaaMode %d\n", sanitize_msaa(msaa_mode));
     fprintf(f, "setting_buildType %d\n", (build_type == 0 || build_type == 1) ? build_type : 0);
@@ -200,6 +206,7 @@ static void render_frame() {
         const char *value;
     };
     OptionDesc options[OPTION_COUNT] = {
+        {"GAMEPLAY SPEED",         pc_speed ? "PC" : "ANDROID"},
         {"MSAA ANTI-ALIASING",    msaa_to_string(msaa_mode)},
         {"BUILD TYPE",            build_type ? "DEBUG" : "RELEASE"},
         {"LOW PERFORMANCE MODE",  low_performance ? "ON" : "OFF"},
@@ -277,6 +284,10 @@ static void ensure_scroll_visible() {
 static void cycle_option(int idx, int direction) {
     /* direction: +1 = forward/right, -1 = backward/left. */
     switch (idx) {
+        case OPT_GAMEPLAY_SPEED:
+            pc_speed = pc_speed ? 0 : 1;
+            dirty = true;
+            break;
         case OPT_MSAA:
             msaa_mode = (msaa_mode + (direction > 0 ? 1 : 2)) % 3;
             dirty = true;

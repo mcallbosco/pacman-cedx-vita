@@ -20,6 +20,7 @@ bool setting_lowPerformance;
 bool setting_unlockAllContent;
 int setting_motionBlurSamples;
 bool setting_reduceGhostTrails;
+bool setting_pcSpeed;
 
 const char *settings_msaa_to_string(int mode) {
     switch (mode) {
@@ -39,6 +40,7 @@ int settings_sanitize_msaa_mode(int mode) {
 }
 
 void settings_reset() {
+    setting_pcSpeed = true;
     setting_sampleSetting  = 1;
     setting_sampleSetting2 = true;
     setting_msaaMode       = SETTING_MSAA_OFF;
@@ -68,6 +70,7 @@ void settings_load() {
                      strcmp("setting_accessAllMissions", buffer) == 0) setting_unlockAllContent = (bool)value;
             else if (strcmp("setting_motionBlurSamples", buffer) == 0) setting_motionBlurSamples = settings_sanitize_motion_blur_samples(value);
             else if (strcmp("setting_reduceGhostTrails", buffer) == 0) setting_reduceGhostTrails = (bool)value;
+            else if (strcmp("setting_pcSpeed", buffer) == 0) setting_pcSpeed = (bool)value;
         }
         fclose(config);
     }
@@ -79,6 +82,7 @@ void settings_save() {
     FILE *config = fopen(CONFIG_FILE_PATH, "w+");
 
     if (config) {
+        fprintf(config, "setting_pcSpeed %d\n", (int)setting_pcSpeed);
         fprintf(config, "%s %d\n", "setting_sampleSetting", (int)(setting_sampleSetting));
         fprintf(config, "%s %d\n", "setting_sampleSetting2", (int)(setting_sampleSetting2));
         fprintf(config, "%s %d\n", "setting_msaaMode", settings_sanitize_msaa_mode(setting_msaaMode));

@@ -33,6 +33,7 @@ extern bool setting_lowPerformance;  /* true = tell game this is weak HW */
 extern bool setting_unlockAllContent; /* true = bypass content access checks */
 extern int setting_motionBlurSamples; /* 2/4 = reduced, 8 = original */
 extern bool setting_reduceGhostTrails;
+extern bool setting_pcSpeed;
 
 static inline int settings_sanitize_motion_blur_samples(int samples) {
     return samples == 2 || samples == 8 ? samples : 4;
