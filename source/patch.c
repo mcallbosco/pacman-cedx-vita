@@ -29,6 +29,7 @@ extern so_module fmod_mod;
 #include "utils/pgxt.h"
 #include "utils/game_perf.h"
 #include "utils/game_speed.h"
+#include "utils/game_rules.h"
 #include "utils/game_audio.h"
 #include "utils/game_patch.h"
 #include "utils/settings.h"
@@ -613,6 +614,7 @@ void so_patch(void) {
      * per-pixel CPU decode. Expected win: ~10–15 s of startup → ~1–2 s. */
     pgxt_install_hooks();
     game_perf_install_hooks();
+    game_rules_install_hooks();
     game_speed_install_hooks();
     game_audio_install_hooks();
     install_content_unlocks();
