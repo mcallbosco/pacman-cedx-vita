@@ -33,6 +33,7 @@ enum {
 enum OptionIndex {
     OPT_GAMEPLAY_SPEED = 0,
     OPT_PC_RULES,
+    OPT_LANGUAGE,
     OPT_MSAA,
     OPT_BUILD_TYPE,
     OPT_LOW_PERF,
@@ -49,6 +50,7 @@ enum OptionIndex {
 static int msaa_mode = MSAA_OFF;
 static int pc_speed = 1;
 static int pc_rules = 0;
+static int language = SETTING_LANGUAGE_SYSTEM;
 static int build_type = 0;       /* 0=release, 1=debug */
 static int low_performance = 0;  /* 0=off, 1=on */
 static int motion_blur_samples = 4;
@@ -96,6 +98,7 @@ static int sanitize_msaa(int mode) {
 }
 
 static void load_settings() {
+    language = SETTING_LANGUAGE_SYSTEM;
     pc_speed = 1;
     pc_rules = 0;
     msaa_mode = MSAA_OFF;
@@ -120,6 +123,8 @@ static void load_settings() {
             pc_rules = (val != 0) ? 1 : 0;
         else if (strcmp(key, "setting_pcSpeed") == 0)
             pc_speed = (val != 0) ? 1 : 0;
+        else if (strcmp(key, "setting_language") == 0)
+            language = settings_sanitize_language(val);
         else if (strcmp(key, "setting_buildType") == 0)
             build_type = (val == 0 || val == 1) ? val : 0;
         else if (strcmp(key, "setting_lowPerformance") == 0)
@@ -150,6 +155,7 @@ static void save_settings() {
     fprintf(f, "setting_sampleSetting 1\n");
     fprintf(f, "setting_pcRules %d\n", pc_rules ? 1 : 0);
     fprintf(f, "setting_pcSpeed %d\n", pc_speed ? 1 : 0);
+    fprintf(f, "setting_language %d\n", settings_sanitize_language(language));
     fprintf(f, "setting_sampleSetting2 1\n");
     fprintf(f, "setting_msaaMode %d\n", sanitize_msaa(msaa_mode));
     fprintf(f, "setting_buildType %d\n", (build_type == 0 || build_type == 1) ? build_type : 0);
@@ -179,8 +185,9 @@ static void draw_row(float x, float y, float w, const char *label, const char *v
 
     vita2d_draw_rectangle(x, y, w, 58.0f, bg);
     draw_label((int)x + 18, (int)y + 38, fg, 1.0f, label);
-    if (value)
-        draw_label((int)(x + w) - 174, (int)y + 38, vg, 1.0f, value);
+    if (value && g_font)
+        draw_label((int)(x + w) - 18 - vita2d_pgf_text_width(g_font, 1.0f, value),
+                   (int)y + 38, vg, 1.0f, value);
 }
 
 static void draw_scroll_arrow_up(int cx, int cy, unsigned int color) {
@@ -211,9 +218,14 @@ static void render_frame() {
         const char *label;
         const char *value;
     };
+    static const char *const languages[SETTING_LANGUAGE_COUNT + 1] = {
+        "SYSTEM", "JAPANESE", "ENGLISH", "FRENCH", "ITALIAN", "GERMAN",
+        "SPANISH", "RUSSIAN", "CHINESE (SIMPL.)", "KOREAN", "PORTUGUESE (BR)"
+    };
     OptionDesc options[OPTION_COUNT] = {
         {"GAMEPLAY SPEED",         pc_speed ? "PC" : "ANDROID"},
         {"PC GAMEPLAY RULES",      pc_rules ? "ON" : "OFF"},
+        {"GAME LANGUAGE",         languages[settings_sanitize_language(language) + 1]},
         {"MSAA ANTI-ALIASING",    msaa_to_string(msaa_mode)},
         {"BUILD TYPE",            build_type ? "DEBUG" : "RELEASE"},
         {"LOW PERFORMANCE MODE",  low_performance ? "ON" : "OFF"},
@@ -297,6 +309,12 @@ static void cycle_option(int idx, int direction) {
             break;
         case OPT_PC_RULES:
             pc_rules = pc_rules ? 0 : 1;
+            dirty = true;
+            break;
+        case OPT_LANGUAGE:
+            language += direction > 0 ? 1 : -1;
+            if (language >= SETTING_LANGUAGE_COUNT) language = SETTING_LANGUAGE_SYSTEM;
+            if (language < SETTING_LANGUAGE_SYSTEM) language = SETTING_LANGUAGE_COUNT - 1;
             dirty = true;
             break;
         case OPT_MSAA:

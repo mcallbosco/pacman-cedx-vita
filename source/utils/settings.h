@@ -25,6 +25,21 @@ enum {
     SETTING_MSAA_4X = 2
 };
 
+enum {
+    SETTING_LANGUAGE_SYSTEM = -1,
+    SETTING_LANGUAGE_JAPANESE = 0,
+    SETTING_LANGUAGE_ENGLISH,
+    SETTING_LANGUAGE_FRENCH,
+    SETTING_LANGUAGE_ITALIAN,
+    SETTING_LANGUAGE_GERMAN,
+    SETTING_LANGUAGE_SPANISH,
+    SETTING_LANGUAGE_RUSSIAN,
+    SETTING_LANGUAGE_CHINESE,
+    SETTING_LANGUAGE_KOREAN,
+    SETTING_LANGUAGE_PORTUGUESE,
+    SETTING_LANGUAGE_COUNT
+};
+
 extern int  setting_sampleSetting;
 extern bool setting_sampleSetting2;
 extern int  setting_msaaMode;
@@ -35,6 +50,12 @@ extern int setting_motionBlurSamples; /* 2/4 = reduced, 8 = original */
 extern bool setting_reduceGhostTrails;
 extern bool setting_pcSpeed;
 extern bool setting_pcRules;
+extern int setting_language;
+
+static inline int settings_sanitize_language(int language) {
+    return language >= SETTING_LANGUAGE_SYSTEM && language < SETTING_LANGUAGE_COUNT
+        ? language : SETTING_LANGUAGE_SYSTEM;
+}
 
 static inline int settings_sanitize_motion_blur_samples(int samples) {
     return samples == 2 || samples == 8 ? samples : 4;

@@ -511,24 +511,35 @@ static void fh_writeFileToSD(jmethodID id, va_list args) {
     fjni_log_dbg("writeFileToSD: stubbed");
 }
 
-static jint fh_GetLanguageID(jmethodID id, va_list args) {
+static int game_language(void) {
+    int language = settings_sanitize_language(setting_language);
+    if (language != SETTING_LANGUAGE_SYSTEM)
+        return language;
+
     int lang = -1;
-    sceAppUtilSystemParamGetInt(SCE_SYSTEM_PARAM_ID_LANG, &lang);
-    /* Map Vita language IDs to game's expected IDs.
-     * The game uses -1 for auto-detect, which should work fine. */
+    if (sceAppUtilSystemParamGetInt(SCE_SYSTEM_PARAM_ID_LANG, &lang) < 0)
+        return SETTING_LANGUAGE_ENGLISH;
     switch (lang) {
-        case SCE_SYSTEM_PARAM_LANG_JAPANESE:  return 0;
+        case SCE_SYSTEM_PARAM_LANG_JAPANESE:  return SETTING_LANGUAGE_JAPANESE;
         case SCE_SYSTEM_PARAM_LANG_ENGLISH_US:
-        case SCE_SYSTEM_PARAM_LANG_ENGLISH_GB: return 1;
-        case SCE_SYSTEM_PARAM_LANG_FRENCH:    return 2;
-        case SCE_SYSTEM_PARAM_LANG_SPANISH:   return 3;
-        case SCE_SYSTEM_PARAM_LANG_GERMAN:    return 4;
-        case SCE_SYSTEM_PARAM_LANG_ITALIAN:   return 5;
-        case SCE_SYSTEM_PARAM_LANG_KOREAN:    return 6;
-        case SCE_SYSTEM_PARAM_LANG_CHINESE_T: return 7;
-        case SCE_SYSTEM_PARAM_LANG_CHINESE_S: return 8;
-        default: return 1; /* English */
+        case SCE_SYSTEM_PARAM_LANG_ENGLISH_GB: return SETTING_LANGUAGE_ENGLISH;
+        case SCE_SYSTEM_PARAM_LANG_FRENCH:    return SETTING_LANGUAGE_FRENCH;
+        case SCE_SYSTEM_PARAM_LANG_SPANISH:   return SETTING_LANGUAGE_SPANISH;
+        case SCE_SYSTEM_PARAM_LANG_GERMAN:    return SETTING_LANGUAGE_GERMAN;
+        case SCE_SYSTEM_PARAM_LANG_ITALIAN:   return SETTING_LANGUAGE_ITALIAN;
+        case SCE_SYSTEM_PARAM_LANG_RUSSIAN:   return SETTING_LANGUAGE_RUSSIAN;
+        case SCE_SYSTEM_PARAM_LANG_KOREAN:    return SETTING_LANGUAGE_KOREAN;
+        /* The supplied pack has Simplified Chinese and Brazilian Portuguese. */
+        case SCE_SYSTEM_PARAM_LANG_CHINESE_T:
+        case SCE_SYSTEM_PARAM_LANG_CHINESE_S: return SETTING_LANGUAGE_CHINESE;
+        case SCE_SYSTEM_PARAM_LANG_PORTUGUESE_PT:
+        case SCE_SYSTEM_PARAM_LANG_PORTUGUESE_BR: return SETTING_LANGUAGE_PORTUGUESE;
+        default: return SETTING_LANGUAGE_ENGLISH;
     }
+}
+
+static jint fh_GetLanguageID(jmethodID id, va_list args) {
+    return game_language();
 }
 
 static jint fh_GetDate_Year(jmethodID id, va_list args)  { return 2026; }
@@ -561,7 +572,10 @@ static jboolean hasLowPerformance(jmethodID id, va_list args) {
 }
 
 static jobject getLanguage(jmethodID id, va_list args) {
-    return (jobject)(*(&jni))->NewStringUTF(&jni, "en");
+    static const char *const codes[SETTING_LANGUAGE_COUNT] = {
+        "ja", "en", "fr", "it", "de", "es", "ru", "zh", "ko", "pt"
+    };
+    return (jobject)(*(&jni))->NewStringUTF(&jni, codes[game_language()]);
 }
 
 static void keepScreenOn(jmethodID id, va_list args) {

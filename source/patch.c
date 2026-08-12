@@ -552,6 +552,18 @@ static void install_content_unlocks(void) {
                                  &nop, sizeof(nop));
 }
 
+static void enable_japanese_language(void) {
+    uintptr_t init = game_patch_checked_function(
+        "_ZN3sys14SystemLanguage4InitEv", 0x22c, 0x49f36a1cu);
+    if (!init) return;
+
+    /* The Android TV/build-type restriction replaces Japanese with English.
+     * Let "ja" reach its existing text/font selection at Init+0x17c. */ 
+    const uint16_t branch = 0xe00d; /* b.n +0x17c from +0x15e */
+    kuKernelCpuUnrestrictedMemcpy((void *)((init & ~(uintptr_t)1) + 0x15e),
+                                 &branch, sizeof(branch));
+}
+
 void so_patch(void) {
     patch_fmod_invalid_handle_guard();
     install_fmod_api_hooks();
@@ -618,6 +630,7 @@ void so_patch(void) {
     game_speed_install_hooks();
     game_audio_install_hooks();
     install_content_unlocks();
+    enable_japanese_language();
     so_flush_caches(&so_mod);
 
     l_info("Patches applied.");

@@ -22,6 +22,7 @@ int setting_motionBlurSamples;
 bool setting_reduceGhostTrails;
 bool setting_pcSpeed;
 bool setting_pcRules;
+int setting_language;
 
 const char *settings_msaa_to_string(int mode) {
     switch (mode) {
@@ -41,6 +42,7 @@ int settings_sanitize_msaa_mode(int mode) {
 }
 
 void settings_reset() {
+    setting_language = SETTING_LANGUAGE_SYSTEM;
     setting_pcSpeed = true;
     setting_pcRules = false;
     setting_sampleSetting  = 1;
@@ -74,6 +76,7 @@ void settings_load() {
             else if (strcmp("setting_reduceGhostTrails", buffer) == 0) setting_reduceGhostTrails = (bool)value;
             else if (strcmp("setting_pcRules", buffer) == 0) setting_pcRules = (bool)value;
             else if (strcmp("setting_pcSpeed", buffer) == 0) setting_pcSpeed = (bool)value;
+            else if (strcmp("setting_language", buffer) == 0) setting_language = settings_sanitize_language(value);
         }
         fclose(config);
     }
@@ -85,6 +88,7 @@ void settings_save() {
     FILE *config = fopen(CONFIG_FILE_PATH, "w+");
 
     if (config) {
+        fprintf(config, "setting_language %d\n", settings_sanitize_language(setting_language));
         fprintf(config, "setting_pcRules %d\n", (int)setting_pcRules);
         fprintf(config, "setting_pcSpeed %d\n", (int)setting_pcSpeed);
         fprintf(config, "%s %d\n", "setting_sampleSetting", (int)(setting_sampleSetting));
