@@ -45,6 +45,8 @@ FILE *preloader_slurp_adopt(void *buf, size_t size);
  * fast path is exactly the difference between a 100 ms slurp win and a
  * 300 ms slurp win. */
 int    preloader_is_slurp(FILE *fp);
+/* Take a complete record without advancing on failure. */
+const unsigned char *preloader_slurp_take(FILE *fp, size_t nbytes);
 size_t preloader_slurp_fast_read(FILE *fp, void *dst, size_t nbytes);
 int    preloader_slurp_fast_seek(FILE *fp, long offset, int whence);
 long   preloader_slurp_fast_tell(FILE *fp);

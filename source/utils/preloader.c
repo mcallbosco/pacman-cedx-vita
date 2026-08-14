@@ -120,6 +120,15 @@ int preloader_is_slurp(FILE *fp) {
     return slurp_slot_of(fp) >= 0;
 }
 
+const unsigned char *preloader_slurp_take(FILE *fp, size_t nbytes) {
+    int i = slurp_slot_of(fp);
+    if (i < 0 || nbytes > g_slurp_size[i] - g_slurp_pos[i])
+        return NULL;
+    const unsigned char *data = (const unsigned char *)g_slurp_data[i] + g_slurp_pos[i];
+    g_slurp_pos[i] += nbytes;
+    return data;
+}
+
 size_t preloader_slurp_fast_read(FILE *fp, void *dst, size_t nbytes) {
     int i = slurp_slot_of(fp);
     if (i < 0) return 0;
