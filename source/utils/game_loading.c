@@ -185,7 +185,47 @@ static void __attribute__((naked)) resource_load_bridge(void) {
         "bx r12\n");
 }
 
+/* Each native loop fills a contiguous 65-by-47 byte array. Keep the character
+ * array's 0xff sentinel and the two extra byte resets alongside it. */
+#define MAP_BUFFER_CELLS (65 * 47)
+
+static void clear_map_flippers(void *map) {
+    memset((char *)map + 0x6b80, 0, MAP_BUFFER_CELLS);
+}
+
+static void clear_map_smoothers(void *map) {
+    memset((char *)map + 0x776f, 0, MAP_BUFFER_CELLS);
+}
+
+static void clear_map_characters(void *map) {
+    ((unsigned char *)map)[24] = 0;
+    memset((char *)map + 25, 0xff, MAP_BUFFER_CELLS);
+    ((unsigned char *)map)[0x8f9c] = 0;
+}
+
+static void clear_map_pellet_animation(void *map) {
+    memset((char *)map + 0x2fd5, 0, MAP_BUFFER_CELLS);
+}
+
 void game_loading_install_hooks(void) {
+    static const struct {
+        const char *symbol;
+        size_t size;
+        uint32_t hash;
+        void (*replacement)(void *);
+    } map_clears[] = {
+        {"_ZN9newPacman10cMapBuffer17clearFliperBufferEv", 0x6a, 0x33f7c2bd, clear_map_flippers},
+        {"_ZN9newPacman10cMapBuffer18clearSmooserBufferEv", 0x6a, 0x7893f47b, clear_map_smoothers},
+        {"_ZN9newPacman10cMapBuffer20clearCharactorBufferEv", 0x72, 0x13aa61be, clear_map_characters},
+        {"_ZN9newPacman10cMapBuffer18clearEsaAnimBufferEv", 0x6a, 0xe1c26b38, clear_map_pellet_animation}
+    };
+    for (size_t i = 0; i < sizeof(map_clears) / sizeof(map_clears[0]); ++i) {
+        uintptr_t clear = game_patch_checked_function(
+            map_clears[i].symbol, map_clears[i].size, map_clears[i].hash);
+        if (clear)
+            hook_addr(clear, (uintptr_t)map_clears[i].replacement);
+    }
+
     uintptr_t keyframe = game_patch_checked_function(
         "_ZN3sys5runny13RunnyKeyframe8LoadFromEPNS_6StreamE", 0x1a0, 0x96072187);
     uintptr_t stream = game_patch_checked_function(

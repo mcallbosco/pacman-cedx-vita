@@ -58,6 +58,11 @@ static int reduce_ghost_trails = 0;
 static int all_content = 1;     /* 1=unlocked, 0=normal */
 static int dummy_setting = 0;    /* placeholder setting to demo scrolling */
 static bool dirty = false;
+static bool reset_holding = false;
+static bool reset_fired = false;
+static uint64_t reset_started = 0;
+static float reset_progress = 0.0f;
+static uint64_t reset_notice_until = 0;
 
 static int selected_row = 0;     /* 0..OPTION_COUNT-1 = option, OPTION_COUNT = button row */
 static int selected_button = 0;  /* 0 = SAVE, 1 = EXIT */
@@ -97,7 +102,7 @@ static int sanitize_msaa(int mode) {
     return mode;
 }
 
-static void load_settings() {
+static void reset_settings() {
     language = SETTING_LANGUAGE_SYSTEM;
     pc_speed = 1;
     pc_rules = 0;
@@ -108,6 +113,34 @@ static void load_settings() {
     reduce_ghost_trails = 0;
     all_content = 1;
     dummy_setting = 0;
+}
+
+/* Require one continuous hold, and release before another reset. */
+static bool update_reset_hold(uint32_t buttons, uint64_t now) {
+    const uint32_t bumpers = SCE_CTRL_LTRIGGER | SCE_CTRL_RTRIGGER;
+    if ((buttons & bumpers) != bumpers) {
+        reset_holding = false;
+        reset_fired = false;
+        reset_progress = 0.0f;
+        return false;
+    }
+    if (!reset_holding) {
+        reset_holding = true;
+        reset_started = now;
+    }
+    uint64_t elapsed = now - reset_started;
+    reset_progress = elapsed >= 1000000 ? 1.0f : (float)elapsed / 1000000.0f;
+    if (!reset_fired && elapsed >= 1000000) {
+        reset_settings();
+        dirty = true;
+        reset_fired = true;
+        reset_notice_until = now + 3000000;
+    }
+    return true;
+}
+
+static void load_settings() {
+    reset_settings();
     FILE *f = fopen(CONFIG_FILE, "r");
     if (!f) {
         log_line("load_settings: %s missing, using default", CONFIG_FILE);
@@ -213,6 +246,11 @@ static void render_frame() {
     draw_label(62, 52, RGBA8(244, 246, 250, 255), 1.4f, "PAC-MAN CE DX CONFIGURATION");
     draw_label(64, 146, RGBA8(188, 198, 218, 255), 1.0f, "D-Pad: navigate    Left/Right: change value");
     draw_label(64, 176, RGBA8(188, 198, 218, 255), 1.0f, "X: select/save    O: back/exit");
+    vita2d_draw_rectangle(528.0f, 152.0f, 368.0f, 32.0f, RGBA8(50, 60, 76, 255));
+    vita2d_draw_rectangle(528.0f, 182.0f, 368.0f * reset_progress, 2.0f,
+                          RGBA8(242, 210, 64, 255));
+    draw_label(542, 175, RGBA8(236, 240, 246, 255), 0.9f,
+               reset_fired ? "DEFAULTS RESTORED" : "L + R (1s): RESET OPTIONS");
 
     struct OptionDesc {
         const char *label;
@@ -277,7 +315,9 @@ static void render_frame() {
     draw_label((int)right_x + 150, (int)btn_y + 38, exit_fg, 1.0f, "EXIT");
 
     draw_label(64, 536, RGBA8(194, 200, 210, 255), 1.0f,
-               dirty ? "Unsaved changes. Press SAVE & EXIT to keep them."
+               sceKernelGetProcessTimeWide() < reset_notice_until
+                     ? "Defaults restored. Press SAVE & EXIT to keep them."
+                     : dirty ? "Unsaved changes. Press SAVE & EXIT to keep them."
                      : "Changes apply on next game launch.");
 
     vita2d_end_drawing();
@@ -301,6 +341,7 @@ static void ensure_scroll_visible() {
 }
 
 static void cycle_option(int idx, int direction) {
+    reset_notice_until = 0;
     /* direction: +1 = forward/right, -1 = backward/left. */
     switch (idx) {
         case OPT_GAMEPLAY_SPEED:
@@ -380,8 +421,11 @@ int main() {
     bool save_on_exit = false;
 
     while (running) {
-        sceCtrlPeekBufferPositive(0, &pad, 1);
+        if (sceCtrlPeekBufferPositive(0, &pad, 1) <= 0)
+            pad.buttons = 0;
         uint32_t buttons = pad.buttons;
+        if (update_reset_hold(buttons, sceKernelGetProcessTimeWide()))
+            buttons = 0; /* Keep other controls from editing or saving mid-hold. */
 
         if (pressed(buttons, prev_buttons, SCE_CTRL_UP)) {
             if (selected_row == BUTTON_ROW) {
@@ -428,7 +472,7 @@ int main() {
         }
 
         render_frame();
-        prev_buttons = buttons;
+        prev_buttons = pad.buttons;
     }
 
     if (save_on_exit)
