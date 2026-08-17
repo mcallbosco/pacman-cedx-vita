@@ -50,7 +50,7 @@ void settings_reset() {
     setting_msaaMode       = SETTING_MSAA_OFF;
     setting_buildType      = 0;
     setting_lowPerformance = false;
-    setting_unlockAllContent = true;
+    setting_unlockAllContent = false;
     setting_motionBlurSamples = 4;
     setting_reduceGhostTrails = false;
 }

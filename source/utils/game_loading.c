@@ -208,6 +208,22 @@ static void clear_map_pellet_animation(void *map) {
 }
 
 void game_loading_install_hooks(void) {
+    uintptr_t logo = game_patch_checked_function(
+        "_ZN6pmcedx23NamcoMenuScreen_Premium6UpdateEf", 0x1e8, 0x257ceaaa);
+    if (logo) {
+        /* Advance the opening wait/fade on successive updates, then start
+         * initialization without the extra logo hold. */
+        const uint16_t nop = 0xbf00;
+        const uint16_t waits[] = {0x6c, 0xa2, 0xde};
+        uintptr_t code = logo & ~(uintptr_t)1;
+        for (size_t i = 0; i < sizeof(waits) / sizeof(waits[0]); ++i)
+            kuKernelCpuUnrestrictedMemcpy((void *)(code + waits[i]), &nop, 2);
+        /* Once setup returns, branch directly to SetNextState(2) and the
+         * finished state (6), bypassing the final hold and fade to white. */
+        const uint16_t next_screen = 0xe029; /* b.n +0x1ac from +0x156 */
+        kuKernelCpuUnrestrictedMemcpy((void *)(code + 0x156), &next_screen, 2);
+    }
+
     static const struct {
         const char *symbol;
         size_t size;

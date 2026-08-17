@@ -55,7 +55,7 @@ static int build_type = 0;       /* 0=release, 1=debug */
 static int low_performance = 0;  /* 0=off, 1=on */
 static int motion_blur_samples = 4;
 static int reduce_ghost_trails = 0;
-static int all_content = 1;     /* 1=unlocked, 0=normal */
+static int all_content = 0;     /* 1=unlocked, 0=normal */
 static int dummy_setting = 0;    /* placeholder setting to demo scrolling */
 static bool dirty = false;
 static bool reset_holding = false;
@@ -111,7 +111,7 @@ static void reset_settings() {
     low_performance = 0;
     motion_blur_samples = 4;
     reduce_ghost_trails = 0;
-    all_content = 1;
+    all_content = 0;
     dummy_setting = 0;
 }
 
