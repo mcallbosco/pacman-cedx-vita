@@ -32,6 +32,7 @@ extern so_module fmod_mod;
 #include "utils/game_rules.h"
 #include "utils/game_audio.h"
 #include "utils/game_loading.h"
+#include "utils/game_png.h"
 #include "utils/game_patch.h"
 #include "utils/settings.h"
 #include <stdbool.h>
@@ -626,6 +627,7 @@ void so_patch(void) {
      * in foo.png.gxt (emitted by the website packager) bypasses libpng's
      * per-pixel CPU decode. Expected win: ~10–15 s of startup → ~1–2 s. */
     pgxt_install_hooks();
+    game_png_install_hooks();
     game_perf_install_hooks();
     game_rules_install_hooks();
     game_speed_install_hooks();
