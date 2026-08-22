@@ -5,6 +5,8 @@
 #include "game_tasks.h"
 #include "game_area.h"
 #include "game_grid.h"
+#include "game_map_color.h"
+#include "game_texture.h"
 #include "game_vertex.h"
 #include "game_profile.h"
 #include "game_wave.h"
@@ -179,5 +181,7 @@ void game_perf_install_hooks(void) {
     game_profile_install_hooks();
     game_wave_install_hooks();
     game_frame_install_hooks();
+    game_map_color_install_hooks();
+    game_texture_install_hooks();
     /* so_patch flushes the module's instruction cache after all hooks. */
 }
