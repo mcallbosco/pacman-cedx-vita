@@ -54,6 +54,46 @@ static void hide_pause_button_init(void *self) {
     }
 }
 
+static void (*pacman_spark_update_original)(void *);
+static void (*spark_set_position)(void *, int, int);
+
+/* Func() sets the embedded cSprite position, but Momonga's PaintModuleRegion
+ * overwrites it using its own integer position. */
+static void update_pacman_spark_position(void *self) {
+    pacman_spark_update_original(self);
+    uint32_t flags;
+    memcpy(&flags, (char *)self + 0x14, sizeof(flags));
+    if (flags & 0x40) /* Free() marks the task dead for deferred deletion. */
+        return;
+    void *mmg;
+    float position[2];
+    memcpy(&mmg, (char *)self + 0xc0, sizeof(mmg));
+    memcpy(position, (char *)mmg + 0x60, sizeof(position));
+    spark_set_position(mmg, (int)position[0], (int)position[1]);
+}
+
+static void patch_pacman_spark_position(void) {
+    uintptr_t update = game_patch_checked_function(
+        "_ZN9newPacman14cOnPacmanSpark4FuncEv", 0x2b0, 0xd28afe9eu);
+    uintptr_t position = game_patch_checked_function(
+        "_ZN3sys13MomongaSprite11SetPositionEii", 0x2e, 0x858ce9fdu);
+    uintptr_t vtable = so_symbol(&so_mod, "_ZTVN9newPacman14cOnPacmanSparkE");
+    if (!update || !position || !vtable ||
+        !game_patch_checked_function("_ZN9newPacman14cOnPacmanSparkC1Effffff",
+                                     0x150, 0xc14a7cdcu))
+        return;
+
+    /* Replace only this class's Func slot; keep its drawing and trails native. */
+    uintptr_t *slot = (uintptr_t *)(vtable + 0x10);
+    if (*slot != update)
+        return;
+    pacman_spark_update_original = (void (*)(void *))update;
+    spark_set_position = (void (*)(void *, int, int))position;
+    uintptr_t replacement = (uintptr_t)update_pacman_spark_position;
+    kuKernelCpuUnrestrictedMemcpy(slot, &replacement, sizeof(replacement));
+    l_info("Patched Pac-Man spark animation positions.");
+}
+
 typedef int FMOD_RESULT;
 
 #define FMOD_ERR_FILE_NOTFOUND 18
@@ -604,6 +644,8 @@ void so_patch(void) {
     } else {
         l_warn("pmcedx::GameScreen_Premium::Init not found; pause button will remain.");
     }
+
+    patch_pacman_spark_position();
 
     /* Stub out social/leaderboard network calls — no online services on Vita.
      * Use direct address patching since so_symbol may not find WEAK symbols. */
