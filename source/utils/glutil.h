@@ -35,6 +35,7 @@ void glCompileShader_soloader(GLuint shader);
 void glLinkProgram_soloader(GLuint program);
 
 GLuint glCreateProgram_soloader(void);
+void glDeleteProgram_soloader(GLuint program);
 
 GLuint glCreateShader_soloader(GLenum type);
 

@@ -7,7 +7,8 @@ extern so_module fmod_mod;
 
 enum { POWER_CUE = 52, LOOP_NORMAL = 2, RETRY_FRAMES = 60 };
 
-static so_hook bundler_hook, destroy_hook, sfx_hook;
+static so_hook destroy_hook, sfx_hook;
+static uintptr_t bundler_resume __attribute__((used));
 static void **enemy_root, **preferences;
 static const bool *pause_menu_shown;
 static bool (*is_preview)(void), (*is_paused)(void), (*is_tutorial_paused)(void);
@@ -106,10 +107,21 @@ static void stop_wave(void *sound_manager) {
     stop_channel();
 }
 
+/* Replay the checked entry once, then resume before its first PC-relative
+ * load. The native epilogue unwinds this frame; the entry stays hooked. */
+static void __attribute__((naked, noinline)) bundler_original(void *self) {
+    __asm__(
+        "push {r7, lr}\n"
+        "mov r7, sp\n"
+        "sub sp, #80\n"
+        "mov r1, r0\n"
+        "ldr ip, =bundler_resume\n"
+        "ldr ip, [ip]\n"
+        "bx ip\n");
+}
+
 static void bundler_update(void *self) {
-    so_hook_unpatch(&bundler_hook);
-    ((void (*)(void *))bundler_hook.thumb_addr)(self);
-    so_hook_repatch(&bundler_hook);
+    bundler_original(self);
 
     /* Keep the native cue selection, including power expiry, death and the
      * bundler's sound-disable flag. Other character roots do not own audio.
@@ -265,7 +277,8 @@ void game_audio_install_hooks(void) {
         l_warn("Power-pellet audio patch skipped: unsupported sound code.");
         return;
     }
-    bundler_hook = hook_addr(bundler, (uintptr_t)bundler_update);
+    bundler_resume = bundler + 8;
+    hook_addr(bundler, (uintptr_t)bundler_update);
     destroy_hook = hook_addr(destroy, (uintptr_t)bundler_destroy);
     hook_addr(update, (uintptr_t)sound_update);
     sfx_hook = hook_addr(sfx, (uintptr_t)sfx_play);

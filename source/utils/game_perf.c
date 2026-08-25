@@ -13,6 +13,8 @@
 #include "game_frame.h"
 #include "game_ghost_scan.h"
 #include "game_batch.h"
+#include "game_math.h"
+#include "game_shader.h"
 #include "logger.h"
 #include "settings.h"
 
@@ -146,17 +148,7 @@ void game_perf_install_hooks(void) {
     if (addr && train_list)
         hook_addr(addr, (uintptr_t)target_train_ghost);
 
-    addr = game_patch_checked_function("_ZN3sys8ShEffect5ApplyEPNS_7cSpriteE",
-                            0x1c4, 0xa91519f9u);
-    if (addr) {
-        /* +0x52..+0xae constructs a scaled centre and a rotation value in
-         * stack temporaries that are never read. Skip to +0xb0, retaining all
-         * shader selection, projection, colour and HSV uniform updates.
-         * Thumb B at +0x52: PC=+0x56, displacement=0x5a (45 halfwords). */
-        const uint16_t skip_unused_transform = 0xe02d;
-        kuKernelCpuUnrestrictedMemcpy((void *)((addr & ~(uintptr_t)1) + 0x52),
-                                     &skip_unused_transform, sizeof(skip_unused_transform));
-    }
+    game_shader_install_hooks();
     if (setting_reduceGhostTrails) {
         addr = game_patch_checked_function("_ZN9newPacman12cOnGhostTask12OnModeNormalEv",
                                 0x230, 0xbdb30a78u);
@@ -183,5 +175,6 @@ void game_perf_install_hooks(void) {
     game_frame_install_hooks();
     game_map_color_install_hooks();
     game_texture_install_hooks();
+    game_math_install_hooks();
     /* so_patch flushes the module's instruction cache after all hooks. */
 }

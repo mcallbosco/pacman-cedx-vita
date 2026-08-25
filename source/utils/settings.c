@@ -44,7 +44,7 @@ int settings_sanitize_msaa_mode(int mode) {
 void settings_reset() {
     setting_language = SETTING_LANGUAGE_SYSTEM;
     setting_pcSpeed = true;
-    setting_pcRules = false;
+    setting_pcRules = true;
     setting_sampleSetting  = 1;
     setting_sampleSetting2 = true;
     setting_msaaMode       = SETTING_MSAA_OFF;

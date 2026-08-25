@@ -49,7 +49,7 @@ enum OptionIndex {
 
 static int msaa_mode = MSAA_OFF;
 static int pc_speed = 1;
-static int pc_rules = 0;
+static int pc_rules = 1;
 static int language = SETTING_LANGUAGE_SYSTEM;
 static int build_type = 0;       /* 0=release, 1=debug */
 static int low_performance = 0;  /* 0=off, 1=on */
@@ -105,7 +105,7 @@ static int sanitize_msaa(int mode) {
 static void reset_settings() {
     language = SETTING_LANGUAGE_SYSTEM;
     pc_speed = 1;
-    pc_rules = 0;
+    pc_rules = 1;
     msaa_mode = MSAA_OFF;
     build_type = 0;
     low_performance = 0;

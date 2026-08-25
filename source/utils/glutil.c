@@ -8,6 +8,7 @@
  */
 
 #include "utils/glutil.h"
+#include "utils/game_shader.h"
 
 #include "utils/utils.h"
 #include "utils/dialog.h"
@@ -253,12 +254,18 @@ void glShaderSource_soloader(GLuint shader, GLsizei count,
 
 GLuint glCreateProgram_soloader(void) {
     GLuint prog = glCreateProgram();
+    game_shader_invalidate_program(prog);
     l_info("glCreateProgram() = %u", prog);
     if (prog < MAX_DEBUG_PROGRAMS) {
         program_debug[prog].vertex_shader = 0;
         program_debug[prog].fragment_shader = 0;
     }
     return prog;
+}
+
+void glDeleteProgram_soloader(GLuint program) {
+    game_shader_invalidate_program(program);
+    glDeleteProgram(program);
 }
 
 GLuint glCreateShader_soloader(GLenum type) {
@@ -284,6 +291,7 @@ void glAttachShader_soloader(GLuint program, GLuint shader) {
 
 static int prog5_link_count = 0;
 void glLinkProgram_soloader(GLuint program) {
+    game_shader_invalidate_program(program);
 #ifdef DEBUG_OPENGL
     sceClibPrintf("[gl_dbg] glLinkProgram<%p>(program: %i)\n", __builtin_return_address(0), program);
 #endif

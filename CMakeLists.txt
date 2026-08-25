@@ -178,6 +178,8 @@ add_executable(${CMAKE_PROJECT_NAME}
                source/utils/game_rules_data.c
                source/utils/game_speed.c
                source/utils/game_audio.c
+               source/utils/game_math.c
+               source/utils/game_shader.c
                source/utils/game_loading.c
                source/utils/game_png.c
                source/utils/game_spacing.c
