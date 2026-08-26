@@ -32,6 +32,7 @@ extern so_module fmod_mod;
 #include "utils/game_rules.h"
 #include "utils/game_audio.h"
 #include "utils/game_loading.h"
+#include "utils/game_maze_preload.h"
 #include "utils/game_png.h"
 #include "utils/game_patch.h"
 #include "utils/settings.h"
@@ -675,6 +676,7 @@ void so_patch(void) {
     game_speed_install_hooks();
     game_audio_install_hooks();
     game_loading_install_hooks();
+    game_maze_preload_install_hooks();
     install_content_unlocks();
     enable_japanese_language();
     so_flush_caches(&so_mod);

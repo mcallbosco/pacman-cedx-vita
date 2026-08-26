@@ -36,6 +36,7 @@ typedef size_t (*png_get_rowbytes_fn)(png_structp, png_infop);
 
 static FILE *g_fp[PGXT_FP_SLOTS];
 static char  g_fp_path[PGXT_FP_SLOTS][PGXT_PATH_MAX];
+static int g_fp_end;
 
 static int path_ends_with_png(const char *path) {
     size_t n = strlen(path);
@@ -52,6 +53,7 @@ void pgxt_register_fopen_path(FILE *fp, const char *path) {
             g_fp[i] = fp;
             strncpy(g_fp_path[i], path, PGXT_PATH_MAX - 1);
             g_fp_path[i][PGXT_PATH_MAX - 1] = '\0';
+            if (g_fp_end <= i) g_fp_end = i + 1;
             return;
         }
     }
@@ -59,17 +61,18 @@ void pgxt_register_fopen_path(FILE *fp, const char *path) {
 
 void pgxt_unregister_fopen(FILE *fp) {
     if (!fp) return;
-    for (int i = 0; i < PGXT_FP_SLOTS; ++i) {
+    for (int i = 0; i < g_fp_end; ++i) {
         if (g_fp[i] == fp) {
             g_fp[i] = NULL;
             g_fp_path[i][0] = '\0';
+            while (g_fp_end && !g_fp[g_fp_end - 1]) --g_fp_end;
             return;
         }
     }
 }
 
 static const char *pgxt_lookup_fp_path(FILE *fp) {
-    for (int i = 0; i < PGXT_FP_SLOTS; ++i) {
+    for (int i = 0; i < g_fp_end; ++i) {
         if (g_fp[i] == fp) return g_fp_path[i];
     }
     return NULL;

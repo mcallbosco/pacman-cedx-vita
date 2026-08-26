@@ -1,6 +1,7 @@
 #include "game_loading.h"
 #include "game_patch.h"
 #include "preloader.h"
+#include <arm_neon.h>
 #include <kubridge.h>
 #include <stdatomic.h>
 #include <string.h>
@@ -63,14 +64,18 @@ static void decode_polar(const unsigned char *p, float *x, float *y) {
     *y = radius * sine;
 }
 
-static int __attribute__((used, noinline)) load_keyframe(void *self, void *stream) {
+static const unsigned char *take_stream(void *stream, size_t size) {
     uintptr_t *object = stream;
     if (object[0] != file_stream_vtable ||
         (((unsigned char *)stream)[24] & ((unsigned char *)stream)[25] & 1))
-        return 0;
+        return NULL;
+    return preloader_slurp_take((FILE *)object[5], size);
+}
+
+static int __attribute__((used, noinline)) load_keyframe(void *self, void *stream) {
     /* Consume only complete records from our existing in-memory files.
      * Unknown streams and truncated records retain the native read behavior. */
-    const unsigned char *p = preloader_slurp_take((FILE *)object[5], 20);
+    const unsigned char *p = take_stream(stream, 20);
     if (!p)
         return 0;
 
@@ -114,7 +119,208 @@ static void __attribute__((naked)) keyframe_bridge(void) {
         "mov r2, r1\n"
         "ldr r12, =keyframe_resume\n"
         "ldr r12, [r12]\n"
-        "bx r12\n");
+        "bx r12\n"
+        ".ltorg\n");
+}
+
+/* Keep the native allocations and surrounding loader intact. These bridges
+ * replace only its UV, index and vertex decode loops, after vector resize.
+ * A short record is never partially consumed by the bulk path. */
+static float (*runny_read_float)(void *);
+static unsigned (*runny_read_index)(void *);
+static void (*runny_read_vector)(void *, void *);
+static uintptr_t mesh_uv_resume __attribute__((used));
+static uintptr_t mesh_indices_resume __attribute__((used));
+static uintptr_t vertex_array_resume __attribute__((used));
+
+static void read_vectors(void *stream, float *dst, int count, int flip_y) {
+    if (count <= 0) return;
+    const unsigned char *p = (unsigned)count <= SIZE_MAX / 8
+        ? take_stream(stream, (size_t)count * 8) : NULL;
+    for (int i = 0; i < count; ++i) {
+        if (p) {
+            dst[2 * i] = read_fixed(p + (size_t)i * 8);
+            float y = read_fixed(p + (size_t)i * 8 + 4);
+            dst[2 * i + 1] = flip_y ? 1.0f - y : y;
+        } else if (flip_y) {
+            dst[2 * i] = runny_read_float(stream);
+            dst[2 * i + 1] = 1.0f - runny_read_float(stream);
+        } else {
+            runny_read_vector(stream, dst + (size_t)i * 2);
+        }
+    }
+}
+
+static void __attribute__((used, noinline)) load_mesh_uv(uintptr_t *frame) {
+    uintptr_t *mesh = (void *)frame[22];
+    read_vectors((void *)frame[24], (float *)mesh[4], (int)frame[17], 1);
+}
+
+static void __attribute__((used, noinline)) load_mesh_indices(uintptr_t *frame) {
+    uintptr_t *mesh = (void *)frame[22];
+    int count = (int)mesh[8];
+    if (count <= 0) return;
+    void *stream = (void *)frame[24];
+    uint16_t *dst = (void *)mesh[7];
+    size_t bytes = (size_t)count * 2;
+    const unsigned char *p = take_stream(stream, bytes);
+    if (p) {
+        memcpy(dst, p, bytes);
+    } else {
+        for (int i = 0; i < count; ++i)
+            dst[i] = runny_read_index(stream);
+    }
+}
+
+static int __attribute__((used, noinline)) load_vertex_array(uintptr_t *frame) {
+    uintptr_t *key = (void *)frame[2];
+    int count = (int)frame[5];
+    read_vectors((void *)frame[6], (float *)key[11], count, 0);
+    /* The original void method leaves the final loop index in r0. */
+    return count > 0 ? count : 0;
+}
+
+#define RUNNY_LOOP_BRIDGE(name, decode, resume) \
+    static void __attribute__((naked)) name(void) { \
+        __asm__ volatile( \
+            "mov r0, sp\n" \
+            "push {r4, lr}\n" \
+            "bl " #decode "\n" \
+            "pop {r4, lr}\n" \
+            "ldr r12, =" #resume "\n" \
+            "ldr r12, [r12]\n" \
+            "bx r12\n" \
+            ".ltorg\n"); \
+    }
+RUNNY_LOOP_BRIDGE(mesh_uv_bridge, load_mesh_uv, mesh_uv_resume)
+RUNNY_LOOP_BRIDGE(mesh_indices_bridge, load_mesh_indices, mesh_indices_resume)
+RUNNY_LOOP_BRIDGE(vertex_array_bridge, load_vertex_array, vertex_array_resume)
+#undef RUNNY_LOOP_BRIDGE
+
+static uintptr_t runny_key_vtable, runny_vertex_vtable;
+
+static void *init_runny_track(void *self) {
+    /* Preserve the uninitialized type, padding and field at offset 20. */
+    ((unsigned char *)self)[4] = 0;
+    memset((char *)self + 8, 0, 12);
+    ((uint32_t *)self)[6] = 0;
+    return self;
+}
+
+static void *init_runny_key(void *self) {
+    ((uintptr_t *)self)[0] = runny_key_vtable;
+    ((unsigned char *)self)[4] = 0;
+    uint32x4_t zero = vdupq_n_u32(0);
+    vst1q_u32((uint32_t *)self + 2, zero);
+    vst1q_u32((uint32_t *)self + 6, zero);
+    return self;
+}
+
+static void *init_runny_vertex(void *self) {
+    ((uintptr_t *)self)[0] = runny_vertex_vtable;
+    ((unsigned char *)self)[4] = 0;
+    uint32x4_t zero = vdupq_n_u32(0);
+    vst1q_u32((uint32_t *)self + 2, zero);
+    vst1q_u32((uint32_t *)self + 6, zero);
+    vst1q_u32((uint32_t *)self + 10, zero);
+    return self;
+}
+
+static uint32_t *runny_alloc_offset;
+static uintptr_t **runny_alloc_pool;
+static uintptr_t runny_alloc_resume __attribute__((used));
+
+static uintptr_t __attribute__((used, noinline)) try_runny_alloc(unsigned size) {
+    unsigned offset = *runny_alloc_offset;
+    /* Keep native page refill, including its >= boundary, and all unusual
+     * requests. The existing allocator owns the pages and allocation scope. */
+    if (offset >= 16384 || size >= 16384 - offset)
+        return 0;
+    uintptr_t *pool = *runny_alloc_pool;
+    if (!pool || pool[0] == pool[1]) return 0;
+    uintptr_t page = ((uintptr_t *)pool[1])[-1];
+    *runny_alloc_offset = offset + size;
+    return page + offset;
+}
+
+static void __attribute__((naked)) runny_alloc_bridge(void) {
+    __asm__ volatile(
+        "push {r0, r1, r4, lr}\n"
+        "bl try_runny_alloc\n"
+        "cmp r0, #0\n"
+        "beq 1f\n"
+        "pop {r1, r2, r4, lr}\n"
+        "bx lr\n"
+        "1: pop {r0, r1, r4, lr}\n"
+        "push {r7, lr}\n"
+        "mov r7, sp\n"
+        "sub sp, sp, #24\n"
+        "mov r1, r0\n"
+        "ldr r12, =runny_alloc_resume\n"
+        "ldr r12, [r12]\n"
+        "bx r12\n"
+        ".ltorg\n");
+}
+
+static void install_runny_hooks(void) {
+    uintptr_t track = game_patch_checked_function(
+        "_ZN3sys5runny10RunnyTrackC2Ev", 0x28, 0xb3525ac8);
+    uintptr_t key = game_patch_checked_function(
+        "_ZN3sys5runny13RunnyKeyframeC2Ev", 0x4c, 0x185976e5);
+    uintptr_t vertex = game_patch_checked_function(
+        "_ZN3sys5runny19RunnyKeyframeVertexC2Ev", 0x38, 0xcf810a40);
+    uintptr_t vector = game_patch_checked_function(
+        "_ZN3sys4math7Vector2C2Ev", 0x14, 0x4f827a66);
+    uintptr_t key_vtable = so_symbol(&so_mod, "_ZTVN3sys5runny13RunnyKeyframeE");
+    uintptr_t vertex_vtable = so_symbol(&so_mod, "_ZTVN3sys5runny19RunnyKeyframeVertexE");
+    /* C1 and C2 constructor aliases share these entry points. */
+    if (track) hook_addr(track, (uintptr_t)init_runny_track);
+    if (key && vector && key_vtable) {
+        runny_key_vtable = key_vtable + 8;
+        hook_addr(key, (uintptr_t)init_runny_key);
+        if (vertex && vertex_vtable) {
+            runny_vertex_vtable = vertex_vtable + 8;
+            hook_addr(vertex, (uintptr_t)init_runny_vertex);
+        }
+    }
+
+    uintptr_t alloc = game_patch_checked_function(
+        "_ZN3sys5runny9RunnyBase10RunnyAllocEj", 0xbc, 0xd80338b1);
+    runny_alloc_offset = (void *)so_symbol(&so_mod,
+        "_ZN3sys5runny9RunnyBase33current_runny_alloc_granule_indexE");
+    runny_alloc_pool = (void *)so_symbol(&so_mod,
+        "_ZN3sys5runny9RunnyBase24current_runny_alloc_poolE");
+    if (alloc && runny_alloc_offset && runny_alloc_pool) {
+        runny_alloc_resume = alloc + 8;
+        hook_addr(alloc, (uintptr_t)runny_alloc_bridge);
+    }
+
+    uintptr_t mesh = game_patch_checked_function(
+        "_ZN3sys5runny18RunnyDataSynthMesh22LoadRunnyDataSynthMeshEPNS_6StreamEPNS0_11RunnySpriteE",
+        0x290, 0x3a38e600);
+    uintptr_t vertex_load = game_patch_checked_function(
+        "_ZN3sys5runny19RunnyKeyframeVertex8LoadFromEPNS_6StreamE", 0x60, 0xe941041e);
+    runny_read_float = (void *)game_patch_checked_function(
+        "_ZN3sys5runny10RunnyTools9ReadFloatEPNS_6StreamE", 0x30, 0x48bd6667);
+    runny_read_index = (void *)game_patch_checked_function(
+        "_ZN3sys6Stream10ReadUInt16Ev", 0x50, 0x58f00df8);
+    uintptr_t read_int = game_patch_checked_function(
+        "_ZN3sys6Stream9ReadInt32Ev", 0x4c, 0xdb2ed0dd);
+    runny_read_vector = (void *)game_patch_checked_function(
+        "_ZN3sys5runny10RunnyTools11ReadVector2EPNS_6StreamERNS_4math7Vector2E",
+        0x3a, 0x5c91e484);
+    if (file_stream_vtable && read_int && runny_read_float && runny_read_index) {
+        if (mesh) {
+            mesh_uv_resume = mesh + 0x12a;
+            mesh_indices_resume = mesh + 0x18a;
+            hook_addr(mesh + 0xe2, (uintptr_t)mesh_uv_bridge);
+            hook_addr(mesh + 0x154, (uintptr_t)mesh_indices_bridge);
+        }
+        if (vertex_load && runny_read_vector) {
+            vertex_array_resume = vertex_load + 0x5c;
+            hook_addr(vertex_load + 0x2e, (uintptr_t)vertex_array_bridge);
+        }
+    }
 }
 
 #define RESOURCE_COUNT 463
@@ -182,7 +388,8 @@ static void __attribute__((naked)) resource_load_bridge(void) {
         "mov r2, r1\n"
         "ldr r12, =resource_load_resume\n"
         "ldr r12, [r12]\n"
-        "bx r12\n");
+        "bx r12\n"
+        ".ltorg\n");
 }
 
 /* Each native loop fills a contiguous 65-by-47 byte array. Keep the character
@@ -248,11 +455,13 @@ void game_loading_install_hooks(void) {
         "_ZN3sys10FileStream10ReadBufferEPvi", 0x84, 0xbdc91d54);
     uintptr_t vtable = so_symbol(&so_mod, "_ZTVN3sys10FileStreamE");
     native_sincos = dlsym_soloader(NULL, "sincosf");
-    if (keyframe && stream && vtable && native_sincos) {
+    if (stream && vtable)
         file_stream_vtable = vtable + 8;
+    if (keyframe && stream && vtable && native_sincos) {
         keyframe_resume = keyframe + 8;
         hook_addr(keyframe, (uintptr_t)keyframe_bridge);
     }
+    install_runny_hooks();
 
     uintptr_t glyph = game_patch_checked_function(
         "_ZN3sys12FontTrueType9MakeGlyphEt", 0x1f0, 0xddbfa4a9);

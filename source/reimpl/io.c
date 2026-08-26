@@ -520,9 +520,8 @@ FILE * fopen_soloader(const char * filename, const char * mode) {
         bgm_track_open(ret, final_bgm_path);
     }
 
-    /* .runnybin slurp: these files are read by the game in tight
-     * fread-per-glyph/animation-frame loops (menu.runnybin = 234k fread
-     * calls for 650 KB). Replace the real FILE* with an fmemopen'd buffer
+    /* Animation/text files are read in tight scalar-read loops.
+     * Replace the real FILE* with an fmemopen'd buffer
      * so those calls become memcpy instead of stdio. fmemopen returns a
      * newlib FILE*, so fread_soloader/fseek_soloader/fclose_soloader
      * already route correctly via preloader_is_preloaded(). */
@@ -603,16 +602,8 @@ size_t fread_soloader(void *ptr, size_t size, size_t nmemb, FILE *stream) {
     uint64_t _prof_t0 = sceKernelGetProcessTimeWide();
 #endif
     size_t ret;
-    if (preloader_is_slurp(stream)) {
-        /* Slurp handle — skip newlib entirely and memcpy from our buffer. */
-        size_t req = size * nmemb;
-        size_t got = preloader_slurp_fast_read(stream, ptr, req);
-        ret = (size > 0) ? (got / size) : 0;
-    } else if (preloader_is_preloaded(stream)) {
-        /* fmemopen'd newlib FILE* that we don't own (preloader cache);
-         * must use newlib fread to honor the __sFILE layout. */
-        ret = fread(ptr, size, nmemb, stream);
-    } else {
+    int buffered = preloader_read(stream, ptr, size, nmemb, &ret);
+    if (!buffered) {
 #ifdef USE_SCELIBC_IO
         ret = sceLibcBridge_fread(ptr, size, nmemb, stream);
 #else
@@ -623,7 +614,7 @@ size_t fread_soloader(void *ptr, size_t size, size_t nmemb, FILE *stream) {
      * derive the source path. Whole-file reads (size=1, nmemb=filesize) are
      * typical; partial reads also register and will simply not match if the
      * game later passes a different buffer to LoadFromMem. */
-    if (ret > 0) {
+    if (ret > 0 && buffered != 2) {
         pgxt_register_fread(stream, ptr, size * ret);
     }
 #ifdef ENABLE_IO_PROFILING

@@ -40,11 +40,13 @@ FILE *preloader_slurp_adopt(void *buf, size_t size);
  * preloader_is_slurp(fp) first; if the handle isn't a slurp, these return
  * a don't-care value (0 / -1) and the caller should fall back.
  *
- * Why: fmemopen'd newlib fread has ~1 µs/call lock+buffer overhead. At
- * 233k tight fread calls on menu.runnybin, that's ~230 ms floor — so the
- * fast path is exactly the difference between a 100 ms slurp win and a
- * 300 ms slurp win. */
+ * Animation files still perform many small reads after bulk decoding;
+ * these helpers avoid stdio locking and buffering on those reads. */
 int    preloader_is_slurp(FILE *fp);
+/* Classify and read in one lookup. Return 0 for an untracked stream, 1
+ * for a newlib cache handle, or 2 for an owned slurp handle. Only the
+ * latter is restricted to animation/text files and can skip PNG tracking. */
+int preloader_read(FILE *fp, void *dst, size_t size, size_t count, size_t *result);
 /* Take a complete record without advancing on failure. */
 const unsigned char *preloader_slurp_take(FILE *fp, size_t nbytes);
 size_t preloader_slurp_fast_read(FILE *fp, void *dst, size_t nbytes);

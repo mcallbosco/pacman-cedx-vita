@@ -181,6 +181,7 @@ add_executable(${CMAKE_PROJECT_NAME}
                source/utils/game_math.c
                source/utils/game_shader.c
                source/utils/game_loading.c
+               source/utils/game_maze_preload.c
                source/utils/game_png.c
                source/utils/game_spacing.c
                source/utils/game_ghost_scan.c
