@@ -9,6 +9,7 @@
 
 #include "utils/glutil.h"
 #include "utils/game_shader.h"
+#include "utils/game_map_shader.h"
 
 #include "utils/utils.h"
 #include "utils/dialog.h"
@@ -264,6 +265,7 @@ GLuint glCreateProgram_soloader(void) {
 }
 
 void glDeleteProgram_soloader(GLuint program) {
+    game_map_shader_invalidate(program);
     game_shader_invalidate_program(program);
     glDeleteProgram(program);
 }
@@ -291,6 +293,7 @@ void glAttachShader_soloader(GLuint program, GLuint shader) {
 
 static int prog5_link_count = 0;
 void glLinkProgram_soloader(GLuint program) {
+    game_map_shader_invalidate(program);
     game_shader_invalidate_program(program);
 #ifdef DEBUG_OPENGL
     sceClibPrintf("[gl_dbg] glLinkProgram<%p>(program: %i)\n", __builtin_return_address(0), program);
@@ -322,6 +325,12 @@ void glLinkProgram_soloader(GLuint program) {
 
     GLint linked = GL_FALSE;
     glGetProgramiv(program, GL_LINK_STATUS, &linked);
+    if (linked && program < MAX_DEBUG_PROGRAMS) {
+        GLuint vs = program_debug[program].vertex_shader;
+        GLuint fs = program_debug[program].fragment_shader;
+        if (vs < MAX_DEBUG_SHADERS && fs < MAX_DEBUG_SHADERS)
+            game_map_shader_sources(program, shader_debug[vs].source, shader_debug[fs].source);
+    }
     if (linked == GL_FALSE) {
         GLint log_len = 0;
         glGetProgramiv(program, GL_INFO_LOG_LENGTH, &log_len);

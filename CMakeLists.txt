@@ -189,6 +189,8 @@ add_executable(${CMAKE_PROJECT_NAME}
                source/utils/game_tasks.c
                source/utils/game_area.c
                source/utils/game_grid.c
+               source/utils/game_map_draw.c
+               source/utils/game_map_shader.c
                source/utils/game_map_color.c
                source/utils/game_texture.c
                source/utils/game_vertex.c
@@ -216,6 +218,7 @@ add_executable(${CMAKE_PROJECT_NAME}
 # ---------------------------------------------------------------------------
 set(VITAGL_DIR "${CMAKE_SOURCE_DIR}/lib/vitaGL")
 set(VITAGL_LIB "${VITAGL_DIR}/libvitaGL.a")
+file(GLOB_RECURSE VITAGL_SOURCE_FILES CONFIGURE_DEPENDS "${VITAGL_DIR}/source/*.c" "${VITAGL_DIR}/source/*.h")
 
 # Build flags matching what the port needs
 set(VITAGL_MAKE_FLAGS
@@ -227,6 +230,7 @@ set(VITAGL_MAKE_FLAGS
 
 add_custom_command(
     OUTPUT ${VITAGL_LIB}
+    DEPENDS ${VITAGL_SOURCE_FILES} "${VITAGL_DIR}/Makefile"
     COMMAND make -j$$(nproc) ${VITAGL_MAKE_FLAGS}
     WORKING_DIRECTORY ${VITAGL_DIR}
     COMMENT "Building vitaGL from source (GLSL + softfp)"

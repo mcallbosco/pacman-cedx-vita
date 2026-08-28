@@ -1,5 +1,6 @@
 #include "game_maze_preload.h"
 #include "game_patch.h"
+#include "game_map_shader.h"
 
 #include <psp2/kernel/threadmgr.h>
 #include <string.h>
@@ -64,6 +65,7 @@ static void preload_course(void) {
         sceKernelDelayThread(1000);
     }
 
+    game_map_shader_prepare();
     GLint binding;
     glGetIntegerv(GL_TEXTURE_BINDING_2D, &binding);
     unsigned char seen[LAST_MAZE_TEXTURE - FIRST_MAZE_TEXTURE + 1] = {0};

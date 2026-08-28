@@ -49,6 +49,31 @@ static char *replace_shader_block(const char *source, const char *from, const ch
     return result;
 }
 
+static const char map_blend_optimized[] =
+    "\tvec4 base;\n"
+    "\tvec4 voColor = v_oColor;\n"
+    "\tif(voColor.a == 0.0) {\n"
+    "\t    base = texture2D(u_diffuseMap2, v_oTexCoord2);\n"
+    "\t    voColor.a = 1.0;\n"
+    "\t} else {\n"
+    "\t    base = texture2D(u_diffuseMap, v_oTexCoord);\n"
+    "\t    if(voColor.a < 1.0) {\n"
+    "\t        vec4 subColor = texture2D(u_diffuseMap2, v_oTexCoord2);\n"
+    "\t        base = base*voColor.a + subColor*(1.0 - voColor.a);\n"
+    "\t        voColor.a = 1.0;\n"
+    "\t    }\n"
+    "\t}\n";
+
+char *pmcedx_single_texture_map_shader(const char *source) {
+    if (!source)
+        return NULL;
+    static const char replacement[] =
+        "\tvec4 base = texture2D(u_diffuseMap, v_oTexCoord);\n"
+        "\tvec4 voColor = v_oColor;\n"
+        "\tvoColor.a = 1.0;\n";
+    return replace_shader_block(source, map_blend_optimized, replacement);
+}
+
 char *pmcedx_optimize_map_shader(const char *source) {
     if (!source || !strstr(source, "uniform sampler2D u_diffuseMap2;"))
         return NULL;
@@ -62,21 +87,7 @@ char *pmcedx_optimize_map_shader(const char *source) {
         "\t    base = base*(voColor.a) + subColor*(1.0 - voColor.a);\n"
         "\t    voColor.a = 1.0;\n"
         "\t}\n";
-    static const char blend_optimized[] =
-        "\tvec4 base;\n"
-        "\tvec4 voColor = v_oColor;\n"
-        "\tif(voColor.a == 0.0) {\n"
-        "\t    base = texture2D(u_diffuseMap2, v_oTexCoord2);\n"
-        "\t    voColor.a = 1.0;\n"
-        "\t} else {\n"
-        "\t    base = texture2D(u_diffuseMap, v_oTexCoord);\n"
-        "\t    if(voColor.a < 1.0) {\n"
-        "\t        vec4 subColor = texture2D(u_diffuseMap2, v_oTexCoord2);\n"
-        "\t        base = base*voColor.a + subColor*(1.0 - voColor.a);\n"
-        "\t        voColor.a = 1.0;\n"
-        "\t    }\n"
-        "\t}\n";
-    char *result = replace_shader_block(source, blend, blend_optimized);
+    char *result = replace_shader_block(source, blend, map_blend_optimized);
     if (!result)
         return NULL;
 

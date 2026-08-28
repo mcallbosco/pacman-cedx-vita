@@ -259,7 +259,64 @@ static int validateDrawTexture(texture *tex) {
 		attributes = cur_vao->vertex_attrib_config; \
 		streams = cur_vao->vertex_stream_config; \
 	}
-	
+
+#if !defined(DRAW_SPEEDHACK) && !defined(SAFER_DRAW_SPEEDHACK) && !defined(STRICT_DRAW_COMPLIANCE)
+/* A constant attribute can precede interleaved client arrays, defeating the
+ * packed path's attribute-zero anchor. Share their upload while retaining
+ * the unpacked stream descriptors and the usual GPU pool lifetime. */
+static GLboolean copyInterleavedClientArrays(unsigned attr_num, const uint8_t *attr_map,
+		const SceGxmVertexAttribute *attributes, const SceGxmVertexStream *streams,
+		GLint first, GLsizei count, void **ptrs) {
+	if (first < 0 || count <= 0)
+		return GL_FALSE;
+	uintptr_t base = UINTPTR_MAX;
+	unsigned stride = 0, enabled = 0, last_end = 0;
+	for (unsigned i = 0; i < attr_num; ++i) {
+		uint8_t attr_idx = attr_map[i];
+		if (!(cur_vao->vertex_attrib_state & (1 << attr_idx)))
+			continue;
+		uintptr_t pointer = cur_vao->vertex_attrib_offsets[attr_idx];
+		if (cur_vao->vertex_attrib_vbo[attr_idx] || !pointer || (pointer & 3) ||
+			attributes[i].format != SCE_GXM_ATTRIBUTE_FORMAT_F32 ||
+			!attributes[i].componentCount || attributes[i].componentCount > 4 ||
+			(streams[i].stride != 32 && streams[i].stride != 40) ||
+			(stride && streams[i].stride != stride))
+			return GL_FALSE;
+		stride = streams[i].stride;
+		if (pointer < base)
+			base = pointer;
+		++enabled;
+	}
+	if (enabled < 2)
+		return GL_FALSE;
+	for (unsigned i = 0; i < attr_num; ++i) {
+		uint8_t attr_idx = attr_map[i];
+		if (!(cur_vao->vertex_attrib_state & (1 << attr_idx)))
+			continue;
+		uintptr_t offset = cur_vao->vertex_attrib_offsets[attr_idx] - base;
+		unsigned bytes = attributes[i].componentCount * sizeof(float);
+		if (offset > stride - bytes)
+			return GL_FALSE;
+		if (offset + bytes > last_end)
+			last_end = offset + bytes;
+	}
+	uint64_t first_byte = (uint64_t)first * stride;
+	uint64_t bytes = (uint64_t)(count - 1) * stride + last_end;
+	if (first_byte > UINTPTR_MAX - base || bytes > UINTPTR_MAX - base - first_byte)
+		return GL_FALSE;
+	void *shared = gpu_alloc_mapped_temp((size_t)bytes);
+	if (!shared)
+		return GL_FALSE;
+	vgl_fast_memcpy(shared, (const void *)(base + (uintptr_t)first_byte), (size_t)bytes);
+	for (unsigned i = 0; i < attr_num; ++i) {
+		uint8_t attr_idx = attr_map[i];
+		if (cur_vao->vertex_attrib_state & (1 << attr_idx))
+			ptrs[i] = (uint8_t *)shared + (cur_vao->vertex_attrib_offsets[attr_idx] - base);
+	}
+	return GL_TRUE;
+}
+#endif
+
 #ifdef HAVE_FFP_SHADER_SUPPORT
 const char *ffp_bind_names[FFP_BINDS_NUM] = {
 	"gl_ModelViewProjectionMatrix",
@@ -1100,6 +1157,20 @@ GLboolean _glDrawArrays_CustomShadersIMPL(GLint first, GLsizei count, GLboolean 
 			attributes[i].regIndex = p->attr[attr_idx].regIndex;
 			handlePackedAttrib();
 		}
+#ifndef SAFER_DRAW_SPEEDHACK
+	/* Keep small draws on the original path to avoid layout-validation cost. */
+	} else if (!instanced && count >= 32 && copyInterleavedClientArrays(p->attr_num, p->attr_map,
+			attributes, streams, first, count, ptrs)) {
+		for (int i = 0; i < p->attr_num; i++) {
+			uint8_t attr_idx = p->attr_map[i];
+			attributes[i].regIndex = p->attr[attr_idx].regIndex;
+			if (cur_vao->vertex_attrib_state & (1 << attr_idx)) {
+				attributes[i].offset = 0;
+			} else {
+				disableDrawAttrib(i)
+			}
+		}
+#endif
 	} else {
 		for (int i = 0; i < p->attr_num; i++) {
 			uint8_t attr_idx = p->attr_map[i];
@@ -2493,6 +2564,31 @@ GLint glGetUniformLocation(GLuint prog, const GLchar *name) {
 	}
 
 	return -1;
+}
+
+/* Copy complete, non-array-indexed uniforms between linked specializations.
+ * Locations follow the same lifetime rules as glUniform calls. */
+GLboolean vglCopyUniform(GLint source, GLint destination) {
+	if (!source || source == -1 || !destination || destination == -1)
+		return GL_FALSE;
+	int source_offset = 0, destination_offset = 0;
+	uniform *src = (uniform *)getUniformFromPtr(source, &source_offset);
+	uniform *dst = (uniform *)getUniformFromPtr(destination, &destination_offset);
+	if (source_offset || destination_offset || src->size != dst->size)
+		return GL_FALSE;
+	if (src->size == 0 || src->size == 0xFFFFFFFF) {
+		dst->data = src->data;
+		/* Samplers are read directly when binding textures, outside the
+		 * uniform buffers; their stage flags are not initialized at link. */
+		return GL_TRUE;
+	} else {
+		if (!memcmp(src->data, dst->data, src->size * sizeof(float)))
+			return GL_TRUE;
+		memcpy(dst->data, src->data, src->size * sizeof(float));
+	}
+	if (dst->is_vertex) dirty_vert_unifs = GL_TRUE;
+	if (dst->is_fragment) dirty_frag_unifs = GL_TRUE;
+	return GL_TRUE;
 }
 
 inline void glUniform1i(GLint location, GLint v0) {

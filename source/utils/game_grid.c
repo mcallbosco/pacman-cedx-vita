@@ -1,5 +1,6 @@
 #include "game_grid.h"
 #include "game_patch.h"
+#include "game_map_draw.h"
 #include <string.h>
 
 #pragma GCC optimize ("no-fast-math")
@@ -190,6 +191,7 @@ void game_grid_install_hooks(void) {
         "_ZN3sys7cSprite7ConvPosENS_8cVector2Eb", 0x18c, 0xd7692dceu);
     if (!grid || !transform)
         return;
+    game_map_draw_install(grid);
 
     static const uint16_t offsets[] = {
         0x404, 0x4b4, 0x55e, 0x5f8, 0x6a0, 0x748,

@@ -37,6 +37,7 @@
 #include <utime.h>
 
 #include "utils/glutil.h"
+#include "utils/game_map_shader.h"
 #include "utils/utils.h"
 #include "utils/logger.h"
 
@@ -478,6 +479,20 @@ GLboolean gl_batch_can_index(GLsizei stride) {
     return gl_current_program_fix != 0 &&
            (gl_current_program_fix != 5 || stride == 40);
 #endif
+}
+
+static void draw_map_range(unsigned first, unsigned count) {
+    glDrawArrays_fix(GL_QUADS, first, count);
+}
+
+void gl_draw_direct_grid(const void *buffer, unsigned vertices, unsigned stride) {
+    /* Retain native state setup and the map attribute remap. */
+    if (gl_current_program_fix == 5 && stride == 40 &&
+        game_map_shader_draw(5, prog5_paramlight_value, buffer, vertices, draw_map_range)) {
+        apply_prog5_attr_remap_fix();
+        return;
+    }
+    glDrawArrays_fix(GL_QUADS, 0, vertices);
 }
 
 void gl_draw_indexed_batch(GLuint index_buffer, GLsizei vertices) {

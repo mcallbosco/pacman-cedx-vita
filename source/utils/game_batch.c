@@ -16,6 +16,22 @@ static void (*draw_arrays)(GLenum, GLint, GLsizei);
 static uintptr_t batch_resume __attribute__((used));
 static GLuint sprite_indices;
 static int indices_failed;
+static int direct_grid_supported;
+
+int game_batch_direct_grid_supported(void) {
+    return direct_grid_supported;
+}
+static struct {
+    void *graphics, *buffer;
+    unsigned vertices, stride;
+} direct_grid;
+
+void game_batch_direct_grid(void *graphics, void *buffer, unsigned vertices, unsigned stride) {
+    direct_grid.graphics = graphics;
+    direct_grid.buffer = buffer;
+    direct_grid.vertices = vertices;
+    direct_grid.stride = stride;
+}
 
 /* Ordinary sprites use 0,1,2,0,4,2; grids use 0,1,2,1,4,2. The latter can use
  * vitaGL's existing quad index buffer. Allocate the former once, on the render
@@ -174,6 +190,17 @@ DEFINE_COMPACT(10)
 
 static void __attribute__((used, noinline)) draw_batch(
         GLenum mode, GLint first, GLsizei count, void *graphics) {
+    if (direct_grid.graphics == graphics) {
+        void *buffer;
+        memcpy(&buffer, (char *)graphics + 0x38, sizeof(buffer));
+        int direct = mode == GL_TRIANGLES && first == 0 &&
+            count == direct_grid.vertices && buffer == direct_grid.buffer;
+        direct_grid.graphics = NULL;
+        if (direct) {
+            gl_draw_direct_grid(buffer, count, direct_grid.stride);
+            return;
+        }
+    }
     /* The bundled vitaGL allocates 0xc000 quad indices (8192 quads). Larger
      * or non-quad submissions retain their original draw path and buffer. */
     if (mode == GL_TRIANGLES && first == 0 && count >= 6 &&
@@ -207,7 +234,7 @@ static void __attribute__((used, noinline)) draw_batch(
 }
 
 /* Replace only Flush's draw call and its two preceding instructions. Preserve
- * the native setup/cleanup, including the original logical vertex count. */
+ * native setup/cleanup, including resetting the count after submission. */
 static void __attribute__((naked)) batch_bridge(void) {
     __asm__ volatile(
         "movs r1, #0\n"
@@ -251,4 +278,5 @@ void game_batch_install_hooks(void) {
     hook_addr(floating, (uintptr_t)add_batch_f);
     hook_addr(integer_sub, (uintptr_t)add_batch_sub);
     hook_addr(floating_sub, (uintptr_t)add_batch_sub_f);
+    direct_grid_supported = 1;
 }
