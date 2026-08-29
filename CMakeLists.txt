@@ -190,6 +190,10 @@ add_executable(${CMAKE_PROJECT_NAME}
                source/utils/game_area.c
                source/utils/game_grid.c
                source/utils/game_map_draw.c
+               source/utils/game_sprite_draw.c
+               source/utils/game_viewport.c
+               source/utils/game_fade.c
+               source/utils/game_navigation.c
                source/utils/game_map_shader.c
                source/utils/game_map_color.c
                source/utils/game_texture.c

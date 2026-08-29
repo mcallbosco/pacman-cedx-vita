@@ -1130,6 +1130,7 @@ GLboolean change_stencil_config(SceGxmStencilOp *cfg, GLenum new_cfg); // Change
 GLboolean change_stencil_func_config(SceGxmStencilFunc *cfg, GLenum new_cfg); // Changes current in use stencil test function value
 void update_alpha_test_settings(void); // Changes current in use alpha test operation value
 void update_scissor_test(void); // Changes current in use scissor test region
+void invalidate_scissor_mask(void); // Invalidates the mask and tile clip cached for the current scene
 void resetScissorTestRegion(void); // Resets scissor test region to default values
 void invalidate_viewport(void); // Invalidates currently set viewport
 void validate_viewport(void); // Restores previously invalidated viewport

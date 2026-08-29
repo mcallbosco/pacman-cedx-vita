@@ -1,6 +1,7 @@
 #include "game_map_draw.h"
 #include "game_patch.h"
 #include "game_batch.h"
+#include "game_viewport.h"
 #include "glutil.h"
 #include <string.h>
 
@@ -12,7 +13,6 @@ static void **map_graphics;
 static void *(*map_profile)(void);
 static int (*map_shaders)(void *);
 static int (*map_batches)(void *);
-static void (*map_viewport)(float *, float *);
 
 static uint32_t word(const void *p, unsigned offset) {
     uint32_t value;
@@ -30,7 +30,7 @@ static float number(const void *p, unsigned offset) {
  * coordinates to signed integers and back to floats. Keep both roundings. */
 static void position(float *out, const void *point, float cx, float cy,
                      float px, float py, float sine, float cosine,
-                     void (*viewport)(float *, float *)) {
+                     const GameViewport *viewport, int callback) {
     float x = (number(point, 4) + number(point, 28)) - cx;
     float y = (number(point, 8) + number(point, 32)) - cy;
     float rx, ry;
@@ -46,8 +46,8 @@ static void position(float *out, const void *point, float cx, float cy,
     ry += py;
     __asm__("vcvt.s32.f32 %0, %0\nvcvt.f32.s32 %0, %0" : "+t" (rx));
     __asm__("vcvt.s32.f32 %0, %0\nvcvt.f32.s32 %0, %0" : "+t" (ry));
-    if (viewport) {
-        viewport(&rx, &ry);
+    if (callback) {
+        game_viewport_apply(viewport, &rx, &ry);
         __asm__("vcvt.s32.f32 %0, %0\nvcvt.f32.s32 %0, %0" : "+t" (rx));
         __asm__("vcvt.s32.f32 %0, %0\nvcvt.f32.s32 %0, %0" : "+t" (ry));
     }
@@ -65,9 +65,7 @@ static int __attribute__((used, noinline)) emit_map_strip(const void *frame) {
     unsigned stride = word(sprite, 0x50) ? 40 : 32;
     if (!game_batch_direct_grid_supported() || !graphics || !gl_batch_can_index(stride))
         return 0;
-    void (*viewport)(float *, float *) = (void *)word(graphics, 0x14);
-    if (viewport && viewport != map_viewport)
-        return 0;
+    uintptr_t callback = word(graphics, 0x14);
     void *profile = map_profile();
     if (!map_shaders(profile) || !map_batches(profile))
         return 0;
@@ -75,6 +73,9 @@ static int __attribute__((used, noinline)) emit_map_strip(const void *frame) {
     float *buffer = (void *)word(graphics, 0x3c);
     const unsigned char *points = (void *)word(sprite, 0x1c);
     if (!buffer || !points || !count || count > width || word(graphics, 0x40))
+        return 0;
+    GameViewport viewport;
+    if (!game_viewport_capture(&viewport, callback))
         return 0;
 
     /* Native setup has already selected the effect, palette and blend mode,
@@ -86,7 +87,7 @@ static int __attribute__((used, noinline)) emit_map_strip(const void *frame) {
     float xy[130][2];
     for (unsigned i = 0; i < 2 * (width + 1); ++i)
         position(xy[i], points + i * 52, cx, cy,
-                 number(sprite, 0x54), number(sprite, 0x58), sine, cosine, viewport);
+                 number(sprite, 0x54), number(sprite, 0x58), sine, cosine, &viewport, callback != 0);
 
     float *cursor = buffer;
     for (unsigned x = 0; x < width; ++x) {
@@ -150,15 +151,6 @@ void game_map_draw_install(uintptr_t grid) {
     map_batches = (void *)so_symbol(&so_mod, "_ZN3sys13DeviceProfile22UseBatchesOptimizationEv");
     if (!map_graphics || !map_profile || !map_shaders || !map_batches)
         return;
-    /* The native viewport callback only reads renderer state. Unknown
-     * callbacks can mutate it between vertices, so keep their native loop. */
-    if (game_patch_checked_function(
-            "_ZN3sys5runny8Renderer14TransformPointERKNS_8cVector2E", 0xc4, 0x4081c677u) &&
-        game_patch_checked_function(
-            "_ZN3sys4math6Matrix16TransformPoint2fEPfS2_", 0xd8, 0x806f0c63u))
-        map_viewport = (void *)game_patch_checked_function(
-            "_ZN3sys5runny8Renderer36TranformPointFromGlobalRunnyRendererERfS2_",
-            0x90, 0xcf9c3747u);
     map_loop_resume = grid + 0x1bcc;
     map_loop_done = grid + 0x4e38;
     hook_addr(grid + 0x1bc4, (uintptr_t)map_loop_bridge);

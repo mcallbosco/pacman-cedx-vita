@@ -15,6 +15,10 @@
 #include "game_batch.h"
 #include "game_math.h"
 #include "game_shader.h"
+#include "game_sprite_draw.h"
+#include "game_viewport.h"
+#include "game_navigation.h"
+#include "game_fade.h"
 #include "logger.h"
 #include "settings.h"
 
@@ -100,6 +104,8 @@ static void reuse_sprite_corner_transforms(void) {
             "_ZN3sys7cSprite7ConvPosENS_8cVector2Eb", 0x18c, 0xd7692dceu))
         return;
 
+    game_sprite_draw_install(draw);
+
     static const struct {
         uint16_t offset;
         uint16_t load_base;
@@ -162,6 +168,7 @@ void game_perf_install_hooks(void) {
         }
     }
     game_spacing_install_hooks();
+    game_viewport_install();
     reuse_sprite_corner_transforms();
     game_grid_install_hooks();
     game_transform_install_hooks();
@@ -175,6 +182,8 @@ void game_perf_install_hooks(void) {
     game_frame_install_hooks();
     game_map_color_install_hooks();
     game_texture_install_hooks();
+    game_fade_install_hooks();
+    game_navigation_install_hooks();
     game_math_install_hooks();
     /* so_patch flushes the module's instruction cache after all hooks. */
 }

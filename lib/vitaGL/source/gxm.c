@@ -589,6 +589,7 @@ static inline __attribute__((always_inline)) void sceneEnd(void) {
 
 void sceneReset(void) {
 	if (in_use_framebuffer != active_write_fb || needs_scene_reset || dirty_framebuffer || dirty_query) {
+		invalidate_scissor_mask();
 		dirty_framebuffer = GL_FALSE;
 		dirty_query = GL_FALSE;
 		needs_scene_reset = GL_FALSE;

@@ -14,9 +14,16 @@ static void (*transform_integer)(void *, void *, void *);
 static void (*transform_float)(void *, void *, void *);
 static void (*draw_arrays)(GLenum, GLint, GLsizei);
 static uintptr_t batch_resume __attribute__((used));
+static uintptr_t batch_capacity_resume __attribute__((used));
+static void (*flush_batches)(void *);
 static GLuint sprite_indices;
 static int indices_failed;
 static int direct_grid_supported;
+static int sprite_batch_supported;
+
+/* The checked native Graphics constructor reserves 0xfb1e0 bytes. Keep room
+ * for expansion to six 32-byte vertices if a batch later mixes geometry. */
+enum { SPRITE_BATCH_QUADS = 0xfb1e0 / (6 * 32) };
 
 int game_batch_direct_grid_supported(void) {
     return direct_grid_supported;
@@ -25,6 +32,14 @@ static struct {
     void *graphics, *buffer;
     unsigned vertices, stride;
 } direct_grid;
+
+/* Keep the native six-vertex count for capacity checks. Only the physical
+ * cursor is compact; a mixed batch expands before any ordinary writer runs. */
+static struct {
+    void *graphics;
+    uint32_t *buffer;
+    unsigned quads;
+} direct_sprites;
 
 void game_batch_direct_grid(void *graphics, void *buffer, unsigned vertices, unsigned stride) {
     direct_grid.graphics = graphics;
@@ -81,7 +96,80 @@ static inline void copy_vertex(uint32_t *dst, const uint32_t *src, size_t words)
         vst1_u32(dst + 8, vld1_u32(src + 8));
 }
 
+static void expand_sprites(void *graphics) {
+    if (direct_sprites.graphics != graphics)
+        return;
+    uint32_t *buffer = direct_sprites.buffer;
+    unsigned quads = direct_sprites.quads;
+    direct_sprites.graphics = NULL;
+    /* Expand backwards; a local quad protects overlapping source vertices. */
+    for (unsigned q = quads; q--;) {
+        uint32_t vertices[4][8];
+        memcpy(vertices, buffer + q * 32, sizeof(vertices));
+        static const unsigned order[] = {0, 1, 3, 0, 2, 3};
+        for (unsigned i = 0; i < 6; ++i)
+            copy_vertex(buffer + (q * 6 + i) * 8, vertices[order[i]], 8);
+    }
+    void *cursor = buffer + quads * 48;
+    memcpy((char *)graphics + 0x3c, &cursor, sizeof(cursor));
+}
+
+int game_batch_append_sprite(void *graphics, const uint32_t vertices[4][8]) {
+    if (!sprite_batch_supported)
+        return 0;
+    uint32_t count;
+    uint32_t *buffer, *cursor;
+    memcpy(&count, (char *)graphics + 0x40, 4);
+    memcpy(&buffer, (char *)graphics + 0x38, 4);
+    memcpy(&cursor, (char *)graphics + 0x3c, 4);
+    if (!buffer || !cursor || ((uintptr_t)cursor & 3))
+        return 0;
+    if (count > SPRITE_BATCH_QUADS * 6 - 6) {
+        uintptr_t vtable, flush;
+        memcpy(&vtable, graphics, 4);
+        memcpy(&flush, (const char *)vtable + 60, 4);
+        if (!flush_batches || flush != (uintptr_t)flush_batches)
+            return 0;
+        /* Native BeginBatches compares its vertex count against the byte
+         * capacity. Flush a full sprite batch while its expansion still fits. */
+        flush_batches(graphics);
+        memcpy(&count, (char *)graphics + 0x40, 4);
+        memcpy(&buffer, (char *)graphics + 0x38, 4);
+        memcpy(&cursor, (char *)graphics + 0x3c, 4);
+    }
+    if (!count && direct_sprites.graphics == graphics)
+        direct_sprites.graphics = NULL;
+    int compact = count < SPRITE_BATCH_QUADS * 6 && gl_batch_can_index(32) &&
+        ((!count && cursor == buffer && !direct_sprites.graphics && prepare_sprite_indices()) ||
+         (direct_sprites.graphics == graphics && direct_sprites.buffer == buffer &&
+          count == direct_sprites.quads * 6 && cursor == buffer + direct_sprites.quads * 32));
+    if (compact) {
+        if (!count) {
+            direct_sprites.graphics = graphics;
+            direct_sprites.buffer = buffer;
+            direct_sprites.quads = 0;
+        }
+        memcpy(cursor, vertices, 4 * 32);
+        cursor += 32;
+        ++direct_sprites.quads;
+    } else {
+        expand_sprites(graphics);
+        memcpy(&cursor, (char *)graphics + 0x3c, 4);
+        static const unsigned order[] = {0, 1, 3, 0, 2, 3};
+        for (unsigned i = 0; i < 6; ++i)
+            copy_vertex(cursor + i * 8, vertices[order[i]], 8);
+        cursor += 48;
+    }
+    count += 6;
+    *((uint8_t *)graphics + 0x85) = 0;
+    memcpy((char *)graphics + 0x3c, &cursor, 4);
+    memcpy((char *)graphics + 0x40, &count, 4);
+    return 1;
+}
+
 static void append_vertex(void *graphics, const uint32_t *values, size_t size) {
+    /* A custom transform can flush and recursively emit another sprite. */
+    expand_sprites(graphics);
     void *cursor;
     uint32_t count;
     /* Read these after the transform callback, which may change graphics state. */
@@ -95,6 +183,7 @@ static void append_vertex(void *graphics, const uint32_t *values, size_t size) {
 }
 
 static void integer_position(void *graphics, uint32_t *values, uint8_t subtexture) {
+    expand_sprites(graphics);
     *((uint8_t *)graphics + 0x85) = subtexture;
     transform_integer(graphics, &values[0], &values[1]);
     for (size_t i = 0; i < 2; ++i) {
@@ -106,6 +195,7 @@ static void integer_position(void *graphics, uint32_t *values, uint8_t subtextur
 }
 
 static void float_position(void *graphics, uint32_t *values, uint8_t subtexture) {
+    expand_sprites(graphics);
     *((uint8_t *)graphics + 0x85) = subtexture;
     transform_float(graphics, &values[0], &values[1]);
 }
@@ -190,6 +280,20 @@ DEFINE_COMPACT(10)
 
 static void __attribute__((used, noinline)) draw_batch(
         GLenum mode, GLint first, GLsizei count, void *graphics) {
+    if (direct_sprites.graphics == graphics) {
+        void *buffer, *cursor;
+        memcpy(&buffer, (char *)graphics + 0x38, 4);
+        memcpy(&cursor, (char *)graphics + 0x3c, 4);
+        unsigned quads = direct_sprites.quads;
+        if (mode == GL_TRIANGLES && first == 0 && count == quads * 6 &&
+            buffer == direct_sprites.buffer && cursor == direct_sprites.buffer + quads * 32 &&
+            gl_batch_can_index(32)) {
+            direct_sprites.graphics = NULL;
+            gl_draw_indexed_batch(sprite_indices, quads * 4);
+            return;
+        }
+        expand_sprites(graphics);
+    }
     if (direct_grid.graphics == graphics) {
         void *buffer;
         memcpy(&buffer, (char *)graphics + 0x38, sizeof(buffer));
@@ -245,7 +349,27 @@ static void __attribute__((naked)) batch_bridge(void) {
         "pop {r4, lr}\n"
         "ldr ip, =batch_resume\n"
         "ldr ip, [ip]\n"
-        "bx ip\n");
+        "bx ip\n"
+        ".ltorg\n");
+}
+
+static unsigned __attribute__((used, noinline)) batch_capacity(unsigned stride) {
+    if (stride == 32 || stride == 40)
+        return (0xfb1e0 - 1) / stride;
+    return 0xfb1df;
+}
+
+static void __attribute__((naked)) batch_capacity_bridge(void) {
+    __asm__ volatile(
+        "push {r0, r1, r3, r5, r12, lr}\n"
+        "mov r0, r4\n"
+        "bl batch_capacity\n"
+        "mov r2, r0\n"
+        "pop {r0, r1, r3, r5, r12, lr}\n"
+        "ldr r12, =batch_capacity_resume\n"
+        "ldr r12, [r12]\n"
+        "bx r12\n"
+        ".ltorg\n");
 }
 
 void game_batch_install_hooks(void) {
@@ -273,10 +397,23 @@ void game_batch_install_hooks(void) {
         return;
 
     batch_resume = flush + 0x1cc;
+    flush_batches = (void *)flush;
     hook_addr(flush + 0x1c4, (uintptr_t)batch_bridge);
     hook_addr(integer, (uintptr_t)add_batch);
     hook_addr(floating, (uintptr_t)add_batch_f);
     hook_addr(integer_sub, (uintptr_t)add_batch_sub);
     hook_addr(floating_sub, (uintptr_t)add_batch_sub_f);
     direct_grid_supported = 1;
+    uintptr_t begin = game_patch_checked_function(
+        "_ZN3sys8Graphics12BeginBatchesENS_13PrimitiveTypeEjjNS_9BlendTypeEh",
+        0xfc, 0x3a5847e5u);
+    if (begin && game_patch_checked_function(
+            "_ZN3sys8GraphicsC2Ev", 0xb0, 0x6683dce6u)) {
+        /* Native code compares vertices with its byte allocation. Correct
+         * that bound before its existing flush decision, including mixed
+         * batches that may need the compact sprites expanded in place. */
+        batch_capacity_resume = begin + 0x46;
+        hook_addr(begin + 0x3e, (uintptr_t)batch_capacity_bridge);
+        sprite_batch_supported = 1;
+    }
 }

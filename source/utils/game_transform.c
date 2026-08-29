@@ -13,6 +13,50 @@ static float number(const void *object, size_t offset) {
     return value;
 }
 
+/* Ordinary sprites share their pivot, scale and rotation across four corners.
+ * Call only after native draw setup, with a read-only viewport callback. */
+int game_transform_quad(float points[4][2], const void *sprite) {
+    if (!wrap_angle || !angle_sincos)
+        return 0;
+    float width = number(sprite, 0x5c), height = number(sprite, 0x60);
+    float cx = number(sprite, 0x44) * width;
+    float cy = number(sprite, 0x48) * height;
+    float sx = number(sprite, 0x6c), sy = number(sprite, 0x70);
+    float px = number(sprite, 0x54), py = number(sprite, 0x58);
+    uint32_t angle_bits;
+    memcpy(&angle_bits, (const char *)sprite + 0x74, 4);
+    angle_bits = wrap_angle(angle_bits);
+    float angle;
+    memcpy(&angle, &angle_bits, 4);
+    angle *= 0x1.921fb6p+2f;
+    memcpy(&angle_bits, &angle, 4);
+    float sine, cosine;
+    if (!(angle_bits & 0x7fffffffu)) {
+        sine = angle;
+        cosine = 1.0f;
+    } else {
+        angle_sincos(angle_bits, &sine, &cosine);
+    }
+    for (unsigned i = 0; i < 4; ++i) {
+        float x = ((i & 1) ? width : 0.0f) - cx;
+        float y = ((i & 2) ? height : 0.0f) - cy;
+        x *= sx;
+        y *= sy;
+        float rx, ry;
+        __asm__(
+            "vneg.f32 %0, %2\n"
+            "vmul.f32 %0, %0, %5\n"
+            "vmla.f32 %0, %3, %4\n"
+            "vmul.f32 %1, %3, %5\n"
+            "vmla.f32 %1, %2, %4\n"
+            : "=&t" (rx), "=&t" (ry)
+            : "t" (sine), "t" (cosine), "t" (x), "t" (y));
+        points[i][0] = rx + px;
+        points[i][1] = ry + py;
+    }
+    return 1;
+}
+
 /* Android returns this nontrivial cVector2 through a hidden first pointer,
  * and passes the input vector by address. Keep the original rounding order
  * and native angle wrapping. Nonzero angles retain native trigonometry. */
