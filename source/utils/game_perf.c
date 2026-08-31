@@ -3,6 +3,7 @@
 #include "game_spacing.h"
 #include "game_transform.h"
 #include "game_tasks.h"
+#include "game_primitive.h"
 #include "game_area.h"
 #include "game_grid.h"
 #include "game_map_color.h"
@@ -173,6 +174,7 @@ void game_perf_install_hooks(void) {
     game_grid_install_hooks();
     game_transform_install_hooks();
     game_tasks_install_hooks();
+    game_primitive_install_hooks();
     game_area_install_hooks();
     /* Batch guards inspect the original transform bodies before replacement. */
     game_batch_install_hooks();

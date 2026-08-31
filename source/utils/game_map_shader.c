@@ -129,76 +129,44 @@ static int endpoint(const uint32_t *vertices) {
 }
 
 int game_map_shader_draw(GLuint program, GLfloat light, const void *vertices,
-                         unsigned count, void (*normal_draw)(unsigned, unsigned)) {
+                         unsigned count) {
     if (!single_program || program != source_program || !count ||
         count > 64 * 4 || count % 4)
         return 0;
     const uint32_t *data = vertices;
-    struct { unsigned first, count; int side; } runs[3];
-    unsigned nr = 0, quads = count / 4;
-    for (unsigned i = 0; i < quads;) {
-        int side = endpoint(data + i * 40);
-        unsigned end = i + 1;
-        while (end < quads && endpoint(data + end * 40) == side)
-            ++end;
-        if (nr == 3)
+    int side = endpoint(data);
+    if (side < 0)
+        return 0;
+    /* Mixed strips retain one draw with the normal shader's endpoint sample
+     * checks. Splitting them adds state changes and repacking during the wipe. */
+    for (unsigned i = 1; i < count / 4; ++i)
+        if (endpoint(data + i * 40) != side)
             return 0;
-        runs[nr].first = i;
-        runs[nr].count = end - i;
-        runs[nr++].side = side;
-        i = end;
-    }
-    unsigned eligible = 0;
-    for (unsigned i = 0; i < nr; ++i)
-        if (runs[i].side >= 0 && (nr == 1 || runs[i].count >= 8))
-            eligible += runs[i].count;
-        else
-            runs[i].side = -1;
-    if (!eligible || !vglCopyUniform(source_matrix, single_matrix) ||
+    if (!vglCopyUniform(source_matrix, single_matrix) ||
         (single_hsv != -1 && !vglCopyUniform(source_hsv, single_hsv)) ||
         !vglCopyUniform(source_sampler[0], single_sampler) ||
         !vglCopyUniform(source_sampler[1], single_sampler))
         return 0;
 
-    /* Short endpoint runs retained by the normal shader can coalesce. */
-    unsigned merged = 0;
-    for (unsigned i = 0; i < nr; ++i) {
-        if (merged && runs[i].side == runs[merged - 1].side)
-            runs[merged - 1].count += runs[i].count;
-        else
-            runs[merged++] = runs[i];
-    }
-    nr = merged;
-
     uint32_t compact[64 * 4 * 8];
-    unsigned cursor = 0;
-    for (unsigned i = 0; i < nr; ++i) {
-        if (runs[i].side < 0) {
-            glUseProgram(program);
-            normal_draw(runs[i].first * 4, runs[i].count * 4);
-            continue;
-        }
-        uint32_t *first = compact + cursor;
-        for (unsigned v = runs[i].first * 4; v < (runs[i].first + runs[i].count) * 4; ++v) {
-            const uint32_t *src = data + v * 10;
-            uint32_t *dst = compact + cursor;
-            memcpy(dst, src, 8);
-            memcpy(dst + 2, src + (runs[i].side ? 2 : 4), 8);
-            memcpy(dst + 4, src + 6, 16);
-            cursor += 8;
-        }
-        vglCopyUniform(source_sampler[runs[i].side], single_sampler);
-        glUseProgram(single_program);
-        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 32, first);
-        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 32, first + 2);
-        glVertexAttribPointer(4, 4, GL_FLOAT, GL_FALSE, 32, first + 4);
-        glEnableVertexAttribArray(1);
-        glEnableVertexAttribArray(2);
-        glEnableVertexAttribArray(4);
-        glDisableVertexAttribArray(0);
-        glVertexAttrib1f(0, light);
-        glDrawArrays(GL_QUADS, 0, runs[i].count * 4);
+    for (unsigned v = 0; v < count; ++v) {
+        const uint32_t *src = data + v * 10;
+        uint32_t *dst = compact + v * 8;
+        memcpy(dst, src, 8);
+        memcpy(dst + 2, src + (side ? 2 : 4), 8);
+        memcpy(dst + 4, src + 6, 16);
     }
+    vglCopyUniform(source_sampler[side], single_sampler);
+    glUseProgram(single_program);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 32, compact);
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 32, compact + 2);
+    glVertexAttribPointer(4, 4, GL_FLOAT, GL_FALSE, 32, compact + 4);
+    glEnableVertexAttribArray(1);
+    glEnableVertexAttribArray(2);
+    glEnableVertexAttribArray(4);
+    glDisableVertexAttribArray(0);
+    glVertexAttrib1f(0, light);
+    glDrawArrays(GL_QUADS, 0, count);
     glUseProgram(program);
     return 1;
 }

@@ -6,6 +6,6 @@ void game_map_shader_sources(GLuint program, const char *vertex, const char *fra
 void game_map_shader_invalidate(GLuint program);
 void game_map_shader_prepare(void);
 int game_map_shader_draw(GLuint program, GLfloat light, const void *vertices,
-                         unsigned count, void (*normal_draw)(unsigned, unsigned));
+                         unsigned count);
 
 #endif

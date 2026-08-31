@@ -7,6 +7,12 @@
 static void (*fade_free)(void *);
 static void **effect_root;
 static uintptr_t effect_scan_resume __attribute__((used));
+static void *(*reset_allocate)(uint32_t, void *);
+static void (*reset_construct)(void *, void *, uint32_t, uint32_t, int32_t);
+static uintptr_t reset_parent_vtable;
+static uintptr_t reset_vtable[8];
+static uintptr_t reset_fallback __attribute__((used));
+static uintptr_t reset_done __attribute__((used));
 
 static uint32_t word(const void *p, unsigned offset) {
     uint32_t value;
@@ -66,6 +72,118 @@ static void fade_column(void *task) {
         fade_free(task);
 }
 
+/* One scheduled child replaces the 27 simultaneous endpoint columns. Keeping
+ * a child is deliberate: Execute can run the parent while skipping children.
+ * A bit remains set until both points in that column have reached opacity,
+ * just as the native children retire independently for unusual alpha values. */
+static void reset_columns(void *task) {
+    uint32_t pending = word(task, 48);
+    for (uint32_t column = 0; column < 27; ++column) {
+        uint32_t bit = 1u << column;
+        if (!(pending & bit))
+            continue;
+        unsigned finished = 0;
+        for (uint32_t row = 0; row < 2; ++row) {
+            void *point = grid_point(pointer(task, 28), column, row);
+            float alpha;
+            memcpy(&alpha, (char *)point + 48, 4);
+            float step = 1.0f;
+            __asm__("vadd.f32 %0, %0, %1" : "+t" (alpha) : "t" (step));
+            if (alpha >= 1.0f) {
+                alpha = 1.0f;
+                ++finished;
+            }
+            memcpy((char *)point + 48, &alpha, 4);
+        }
+        if (finished == 2)
+            pending &= ~bit;
+    }
+    memcpy((char *)task + 48, &pending, 4);
+    if (!pending)
+        fade_free(task);
+}
+
+static int __attribute__((used, noinline)) create_reset_child(void *task) {
+    void *sprite = pointer(task, 28);
+    const void *end = (const char *)task + 8;
+    if (word(task, 0) != reset_parent_vtable || word(task, 32) != 0 ||
+        word(task, 36) != 27 || word(task, 40) != 0x3f800000u ||
+        word(task, 44) != 0 || word(task, 48) != 0 ||
+        word(task, 16) != 0 || pointer(task, 8) != end ||
+        pointer(task, 12) != end || !sprite || !pointer(sprite, 28) ||
+        word(sprite, 32) != 26 || word(sprite, 36) != 1)
+        return 0;
+
+    void *child = reset_allocate(52, task);
+    reset_construct(child, sprite, 0, 0x3f800000u, 0);
+    uint32_t pending = (1u << 27) - 1;
+    uintptr_t vtable = (uintptr_t)&reset_vtable[2];
+    memcpy(child, &vtable, 4);
+    memcpy((char *)child + 48, &pending, 4);
+    return 1;
+}
+
+static void __attribute__((naked)) reset_create_bridge(void) {
+    __asm__ volatile(
+        "ldr r0, [sp, #20]\n"
+        "push {r4, lr}\n"
+        "bl create_reset_child\n"
+        "pop {r4, lr}\n"
+        "cmp r0, #0\n"
+        "bne 1f\n"
+        /* Replay the displaced native type-0 loop initialization. */
+        "movs r0, #0\n"
+        "str r0, [sp, #28]\n"
+        "ldr r0, [sp, #28]\n"
+        "ldr ip, =reset_fallback\n"
+        "ldr ip, [ip]\n"
+        "bx ip\n"
+        "1:\n"
+        "ldr ip, =reset_done\n"
+        "ldr ip, [ip]\n"
+        "bx ip\n");
+}
+
+static void install_reset_child(uintptr_t alpha, uintptr_t column) {
+    uintptr_t constructor = game_patch_checked_code(
+        alpha + 0x202, "map alpha column constructor", 0x74, 0xac6aefc3u);
+    uintptr_t destructors = game_patch_checked_code(
+        alpha + 0x2c0, "map alpha column destructors", 0x38, 0xfce22653u);
+    uintptr_t allocate = game_patch_checked_function(
+        "_ZN3sys5cTasknwEjPS0_", 0x34, 0x5e4341cfu);
+    uintptr_t parent = game_patch_checked_function(
+        "_ZN9newPacman22cTsTaskEffectAlphaCtrlC2EPN3sys7cSpriteENS0_8CtrlTypeEfi",
+        0x70, 0x33245140u);
+    uintptr_t parent_vtable = so_symbol(&so_mod,
+        "_ZTVN9newPacman22cTsTaskEffectAlphaCtrlE");
+    if (!constructor || !destructors || !allocate || !parent || !parent_vtable ||
+        !game_patch_checked_function("_ZN3sys5cTaskC2Ev", 0x38, 0x53221002u) ||
+        !game_patch_checked_function("_ZN3sys5cTask7SetFuncEv", 0x16, 0x8d5a97c9u))
+        return;
+
+    /* The checked hidden constructor loads this PC-relative, six-slot table.
+     * Retain its RTTI, both destructors, refresh and draw/exec callbacks. */
+    const void *table = (void *)((constructor & ~(uintptr_t)1) + 0x3a +
+                                word((void *)(constructor & ~(uintptr_t)1), 0x70));
+    const uintptr_t expected[] = {
+        0, 0, destructors, destructors + 0x1a, column,
+        so_symbol(&so_mod, "_ZN3sys5cTask7RefreshEv"),
+        so_symbol(&so_mod, "_ZN3sys5cTask4ExecEv"),
+        so_symbol(&so_mod, "_ZN3sys5cTask4DrawEv")
+    };
+    for (unsigned i = 0; i < 8; ++i)
+        if (word(table, i * 4) != expected[i] || (i > 1 && !expected[i]))
+            return;
+    memcpy(reset_vtable, table, sizeof(reset_vtable));
+    reset_vtable[4] = (uintptr_t)reset_columns;
+    reset_parent_vtable = parent_vtable + 8;
+    reset_allocate = (void *)allocate;
+    reset_construct = (void *)constructor;
+    reset_fallback = alpha + 0x5e;
+    reset_done = alpha + 0x1de;
+    hook_addr(alpha + 0x56, (uintptr_t)reset_create_bridge);
+}
+
 static void __attribute__((used, noinline)) scan_map_effects(void *layer) {
     uint32_t id = word(layer, 264);
     if (id > 1)
@@ -104,8 +222,10 @@ void game_fade_install_hooks(void) {
     if (grid && width && height && alpha && fade_free) {
         uintptr_t column = game_patch_checked_code(
             alpha + 0x2f8, "map alpha column", 0xdc, 0x9577d03au);
-        if (column)
+        if (column) {
+            install_reset_child(alpha, column);
             hook_addr(column, (uintptr_t)fade_column);
+        }
     }
     if (grid) hook_addr(grid, (uintptr_t)grid_point);
     if (width) hook_addr(width, (uintptr_t)grid_width);

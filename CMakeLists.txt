@@ -187,6 +187,7 @@ add_executable(${CMAKE_PROJECT_NAME}
                source/utils/game_ghost_scan.c
                source/utils/game_transform.c
                source/utils/game_tasks.c
+               source/utils/game_primitive.c
                source/utils/game_area.c
                source/utils/game_grid.c
                source/utils/game_map_draw.c
