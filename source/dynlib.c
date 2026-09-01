@@ -38,6 +38,7 @@
 
 #include "utils/glutil.h"
 #include "utils/game_map_shader.h"
+#include "utils/game_wobble.h"
 #include "utils/utils.h"
 #include "utils/logger.h"
 
@@ -483,6 +484,11 @@ GLboolean gl_batch_can_index(GLsizei stride) {
 
 void gl_draw_direct_grid(const void *buffer, unsigned vertices, unsigned stride) {
     /* Retain native state setup and the map attribute remap. */
+    if (gl_current_program_fix == 5 && stride == 40 &&
+        game_wobble_draw(buffer, vertices, prog5_paramlight_value)) {
+        apply_prog5_attr_remap_fix();
+        return;
+    }
     if (gl_current_program_fix == 5 && stride == 40 &&
         game_map_shader_draw(5, prog5_paramlight_value, buffer, vertices)) {
         apply_prog5_attr_remap_fix();
@@ -1253,7 +1259,7 @@ so_default_dynlib default_dynlib[] = {
             { "ferror", (uintptr_t)&sceLibcBridge_ferror },
             { "fflush", (uintptr_t)&sceLibcBridge_fflush },
             { "fgetc", (uintptr_t)&sceLibcBridge_fgetc },
-            { "fgetpos", (uintptr_t)&sceLibcBridge_fgetpos },
+            { "fgetpos", (uintptr_t)&fgetpos_soloader },
             { "fgets", (uintptr_t)&sceLibcBridge_fgets },
             { "fileno", (uintptr_t)&sceLibcBridge_fileno },
             { "fputc", (uintptr_t)&sceLibcBridge_fputc },
@@ -1261,7 +1267,7 @@ so_default_dynlib default_dynlib[] = {
             { "fread", (uintptr_t)&fread_soloader },
             { "freopen", (uintptr_t)&sceLibcBridge_freopen },
             { "fseek", (uintptr_t)&fseek_soloader },
-            { "fsetpos", (uintptr_t)&sceLibcBridge_fsetpos },
+            { "fsetpos", (uintptr_t)&fsetpos_soloader },
             { "ftell", (uintptr_t)&ftell_soloader },
             { "fwide", (uintptr_t)&sceLibcBridge_fwide },
             { "fwrite", (uintptr_t)&sceLibcBridge_fwrite },
@@ -1280,7 +1286,7 @@ so_default_dynlib default_dynlib[] = {
             { "ferror", (uintptr_t)&ferror },
             { "fflush", (uintptr_t)&fflush },
             { "fgetc", (uintptr_t)&fgetc },
-            { "fgetpos", (uintptr_t)&fgetpos },
+            { "fgetpos", (uintptr_t)&fgetpos_soloader },
             { "fgets", (uintptr_t)&fgets },
             { "fileno", (uintptr_t)&fileno },
             { "fputc", (uintptr_t)&fputc },
@@ -1288,7 +1294,7 @@ so_default_dynlib default_dynlib[] = {
             { "fread", (uintptr_t)&fread_soloader },
             { "freopen", (uintptr_t)&freopen },
             { "fseek", (uintptr_t)&fseek_soloader },
-            { "fsetpos", (uintptr_t)&fsetpos },
+            { "fsetpos", (uintptr_t)&fsetpos_soloader },
             { "ftell", (uintptr_t)&ftell_soloader },
             { "fwide", (uintptr_t)&fwide },
             { "fwrite", (uintptr_t)&fwrite },

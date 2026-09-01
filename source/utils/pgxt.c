@@ -200,6 +200,7 @@ static png_get_rowbytes_fn p_png_get_rowbytes;
 static int pgxt_try_fill(png_structp png, png_bytepp rows) {
     if (!g_current_has_path) return 0;
     const char *path = g_current_png_path;
+    if (strncmp(path, "embedded:/", 10) == 0) return 0;
 
     char gxt_path[PGXT_PATH_MAX + 8];
     int np = snprintf(gxt_path, sizeof(gxt_path), "%s.gxt", path);

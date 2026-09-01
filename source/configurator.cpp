@@ -39,6 +39,9 @@ enum OptionIndex {
     OPT_LOW_PERF,
     OPT_MOTION_BLUR,
     OPT_GHOST_TRAILS,
+    OPT_GHOST_CHAIN_TRAIL,
+    OPT_GHOST_EYE_TRAILS,
+    OPT_MAZE_WOBBLE,
     OPT_ALL_CONTENT,
     OPT_DUMMY,
     OPTION_COUNT
@@ -55,6 +58,9 @@ static int build_type = 0;       /* 0=release, 1=debug */
 static int low_performance = 0;  /* 0=off, 1=on */
 static int motion_blur_samples = 4;
 static int reduce_ghost_trails = 0;
+static int ghost_chain_trails = 0;
+static int ghost_eye_trails = 0;
+static int maze_wobble = 0;
 static int all_content = 0;     /* 1=unlocked, 0=normal */
 static int dummy_setting = 0;    /* placeholder setting to demo scrolling */
 static bool dirty = false;
@@ -111,6 +117,9 @@ static void reset_settings() {
     low_performance = 0;
     motion_blur_samples = 4;
     reduce_ghost_trails = 0;
+    ghost_chain_trails = 0;
+    ghost_eye_trails = 0;
+    maze_wobble = 0;
     all_content = 0;
     dummy_setting = 0;
 }
@@ -166,6 +175,12 @@ static void load_settings() {
             motion_blur_samples = settings_sanitize_motion_blur_samples(val);
         else if (strcmp(key, "setting_reduceGhostTrails") == 0)
             reduce_ghost_trails = (val != 0) ? 1 : 0;
+        else if (strcmp(key, "setting_ghostChainTrails") == 0)
+            ghost_chain_trails = (val != 0) ? 1 : 0;
+        else if (strcmp(key, "setting_ghostEyeTrails") == 0)
+            ghost_eye_trails = (val != 0) ? 1 : 0;
+        else if (strcmp(key, "setting_mazeWobble") == 0)
+            maze_wobble = (val != 0) ? 1 : 0;
         else if (strcmp(key, "setting_unlockAllContent") == 0 || strcmp(key, "setting_accessAllMissions") == 0)
             all_content = (val != 0) ? 1 : 0;
         else if (strcmp(key, "setting_dummy") == 0)
@@ -195,6 +210,9 @@ static void save_settings() {
     fprintf(f, "setting_lowPerformance %d\n", low_performance ? 1 : 0);
     fprintf(f, "setting_motionBlurSamples %d\n", settings_sanitize_motion_blur_samples(motion_blur_samples));
     fprintf(f, "setting_reduceGhostTrails %d\n", reduce_ghost_trails ? 1 : 0);
+    fprintf(f, "setting_ghostChainTrails %d\n", ghost_chain_trails ? 1 : 0);
+    fprintf(f, "setting_ghostEyeTrails %d\n", ghost_eye_trails ? 1 : 0);
+    fprintf(f, "setting_mazeWobble %d\n", maze_wobble ? 1 : 0);
     fprintf(f, "setting_unlockAllContent %d\n", all_content ? 1 : 0);
     fprintf(f, "setting_dummy %d\n", dummy_setting ? 1 : 0);
     fclose(f);
@@ -270,6 +288,9 @@ static void render_frame() {
         {"MOTION BLUR SAMPLES",    motion_blur_samples == 8 ? "8 (ORIGINAL)" :
                                   motion_blur_samples == 2 ? "2 (FASTEST)" : "4 (FASTER)"},
         {"GHOST AFTERIMAGES",      reduce_ghost_trails ? "REDUCED" : "FULL"},
+        {"GHOST CHAIN TRAIL",      ghost_chain_trails ? "ON" : "OFF"},
+        {"GHOST EYE TRAILS",       ghost_eye_trails ? "ON" : "OFF"},
+        {"POWERED MAZE WOBBLE",    maze_wobble ? "ON" : "OFF"},
         {"UNLOCK ALL CONTENT",   all_content ? "ON" : "OFF"},
         {"DUMMY SETTING",         dummy_setting ? "ON" : "OFF"},
     };
@@ -379,6 +400,18 @@ static void cycle_option(int idx, int direction) {
             break;
         case OPT_GHOST_TRAILS:
             reduce_ghost_trails = reduce_ghost_trails ? 0 : 1;
+            dirty = true;
+            break;
+        case OPT_GHOST_CHAIN_TRAIL:
+            ghost_chain_trails = ghost_chain_trails ? 0 : 1;
+            dirty = true;
+            break;
+        case OPT_MAZE_WOBBLE:
+            maze_wobble = maze_wobble ? 0 : 1;
+            dirty = true;
+            break;
+        case OPT_GHOST_EYE_TRAILS:
+            ghost_eye_trails = ghost_eye_trails ? 0 : 1;
             dirty = true;
             break;
         case OPT_ALL_CONTENT:

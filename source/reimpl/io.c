@@ -27,6 +27,8 @@
 #include "utils/preloader.h"
 #include "utils/pgxt.h"
 #include "utils/text_patch.h"
+#include "utils/settings.h"
+#include "utils/ghost_eye_shadow_png.h"
 #include <psp2/kernel/processmgr.h>
 
 /* ===== Profiling counters (shared with java.c) =====
@@ -441,6 +443,20 @@ FILE * fopen_soloader(const char * filename, const char * mode) {
     FILE *ret = NULL;
     int only_read = (mode && (mode[0] == 'r') && !strchr(mode, '+'));
 
+    /* Serve the eye glow from the executable, even when the data pack lacks
+     * it. The virtual path prevents sidecars from replacing embedded pixels. */
+    if (only_read && setting_ghostEyeTrails &&
+        !strcmp(filename, DATA_PATH "assets/data/tex/ghost_eye_shadow.png")) {
+        ret = preloader_open_memory(ghost_eye_shadow_png, sizeof(ghost_eye_shadow_png));
+#ifdef ENABLE_IO_PROFILING
+        g_prof_open_us += sceKernelGetProcessTimeWide() - _prof_t0;
+        g_prof_open_count++;
+#endif
+        prof_register_file(ret, filename);
+        pgxt_register_fopen_path(ret, "embedded:/ghost_eye_shadow.png");
+        return ret;
+    }
+
     /* Negative directory cache: short-circuit known-missing files before
      * we pay for a sceLibcBridge_fopen probe. Read-only paths only — write
      * opens create new files and must always go through to the real fopen. */
@@ -668,6 +684,22 @@ long ftell_soloader(FILE *stream) {
 #else
     return ftell(stream);
 #endif
+}
+
+/* ARM32 Bionic uses a four-byte file position. FileStream::Size saves and
+ * restores it around a seek to EOF, including for embedded PNG streams.
+ * Route through the same tracked newlib/slurp/bridge path as seek and tell;
+ * passing a memory FILE directly to sceLibcBridge reads the wrong layout. */
+int fgetpos_soloader(FILE *stream, int32_t *position) {
+    long offset = ftell_soloader(stream);
+    if (offset < 0)
+        return -1;
+    *position = (int32_t)offset;
+    return 0;
+}
+
+int fsetpos_soloader(FILE *stream, const int32_t *position) {
+    return fseek_soloader(stream, *position, SEEK_SET);
 }
 
 int open_soloader(const char * path, int oflag, ...) {

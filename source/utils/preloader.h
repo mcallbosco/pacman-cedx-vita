@@ -19,7 +19,11 @@ void preloader_start(void);
 /* Returns a real fmemopen'd FILE* on cache hit, NULL on miss. */
 FILE *preloader_try_open(const char *path);
 
-/* Non-zero if fp was returned by preloader_try_open. Caller should route
+/* Read-only memory stream, tracked like a cache hit. The buffer is borrowed
+ * and must remain valid until fclose; closing never frees or modifies it. */
+FILE *preloader_open_memory(const void *buf, size_t size);
+
+/* Non-zero if fp was returned by a preloader open/adopt function. Route
  * fread/fseek/ftell/fclose through newlib stdio (not sceLibcBridge_*)
  * because the underlying FILE* is a newlib __sFILE, not a sceLibc one. */
 int preloader_is_preloaded(FILE *fp);

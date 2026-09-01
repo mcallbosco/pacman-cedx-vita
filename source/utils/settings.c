@@ -20,6 +20,9 @@ bool setting_lowPerformance;
 bool setting_unlockAllContent;
 int setting_motionBlurSamples;
 bool setting_reduceGhostTrails;
+bool setting_ghostChainTrails;
+bool setting_ghostEyeTrails;
+bool setting_mazeWobble;
 bool setting_pcSpeed;
 bool setting_pcRules;
 int setting_language;
@@ -53,6 +56,9 @@ void settings_reset() {
     setting_unlockAllContent = false;
     setting_motionBlurSamples = 4;
     setting_reduceGhostTrails = false;
+    setting_ghostChainTrails = false;
+    setting_ghostEyeTrails = false;
+    setting_mazeWobble = false;
 }
 
 void settings_load() {
@@ -74,6 +80,9 @@ void settings_load() {
                      strcmp("setting_accessAllMissions", buffer) == 0) setting_unlockAllContent = (bool)value;
             else if (strcmp("setting_motionBlurSamples", buffer) == 0) setting_motionBlurSamples = settings_sanitize_motion_blur_samples(value);
             else if (strcmp("setting_reduceGhostTrails", buffer) == 0) setting_reduceGhostTrails = (bool)value;
+            else if (strcmp("setting_ghostChainTrails", buffer) == 0) setting_ghostChainTrails = (bool)value;
+            else if (strcmp("setting_ghostEyeTrails", buffer) == 0) setting_ghostEyeTrails = (bool)value;
+            else if (strcmp("setting_mazeWobble", buffer) == 0) setting_mazeWobble = (bool)value;
             else if (strcmp("setting_pcRules", buffer) == 0) setting_pcRules = (bool)value;
             else if (strcmp("setting_pcSpeed", buffer) == 0) setting_pcSpeed = (bool)value;
             else if (strcmp("setting_language", buffer) == 0) setting_language = settings_sanitize_language(value);
@@ -99,6 +108,9 @@ void settings_save() {
         fprintf(config, "%s %d\n", "setting_unlockAllContent", (int)(setting_unlockAllContent));
         fprintf(config, "setting_motionBlurSamples %d\n", settings_sanitize_motion_blur_samples(setting_motionBlurSamples));
         fprintf(config, "setting_reduceGhostTrails %d\n", (int)setting_reduceGhostTrails);
+        fprintf(config, "setting_ghostChainTrails %d\n", (int)setting_ghostChainTrails);
+        fprintf(config, "setting_ghostEyeTrails %d\n", (int)setting_ghostEyeTrails);
+        fprintf(config, "setting_mazeWobble %d\n", (int)setting_mazeWobble);
         fclose(config);
     }
 }

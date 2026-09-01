@@ -331,6 +331,17 @@ FILE *preloader_slurp_adopt(void *buf, size_t size) {
     return fp;
 }
 
+FILE *preloader_open_memory(const void *buf, size_t size) {
+    if (!buf || !size)
+        return NULL;
+    FILE *fp = fmemopen((void *)buf, size, "rb");
+    if (fp && !track_add(fp, NULL, 0)) {
+        fclose(fp);
+        return NULL;
+    }
+    return fp;
+}
+
 FILE *preloader_try_open(const char *path) {
     if (!path) return NULL;
     for (int i = 0; i < g_cache_count; ++i) {
@@ -345,12 +356,7 @@ FILE *preloader_try_open(const char *path) {
         }
         /* fmemopen returns a real newlib FILE*, so the caller (and any
          * library that bypasses our shims) can use it directly. */
-        FILE *fp = fmemopen(e->data, e->size, "rb");
-        if (fp && !track_add(fp, NULL, 0)) {
-            fclose(fp);
-            return NULL;
-        }
-        return fp;
+        return preloader_open_memory(e->data, e->size);
     }
     return NULL;
 }

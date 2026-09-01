@@ -11,6 +11,10 @@
 #include "game_vertex.h"
 #include "game_profile.h"
 #include "game_wave.h"
+#include "game_wobble.h"
+#include "game_ghost_eat.h"
+#include "game_eye_trails.h"
+#include "game_chain_trail.h"
 #include "game_frame.h"
 #include "game_ghost_scan.h"
 #include "game_batch.h"
@@ -133,7 +137,12 @@ static void reuse_sprite_corner_transforms(void) {
 }
 
 void game_perf_install_hooks(void) {
+    game_wobble_install_hooks();
+    game_ghost_eat_install_hooks();
     game_ghost_scan_install_hooks();
+    /* Ghost-scan guards inspect the original update before the trail bridge. */
+    game_eye_trails_install_hooks();
+    game_chain_trail_install_hooks();
     uintptr_t addr = game_patch_checked_function("_ZN3sys7cSprite8SetColorEffff",
                                       0x8c, 0x78062d18u);
     if (addr)

@@ -36,6 +36,14 @@ static float projection[16] = {
     -1, 1, 0, 1
 };
 
+int game_shader_screen_size(float *width, float *height) {
+    if (!projection_valid || projection_width <= 0 || projection_height <= 0)
+        return 0;
+    *width = (float)projection_width;
+    *height = (float)projection_height;
+    return 1;
+}
+
 static uint32_t shader_word(const void *object, size_t offset) {
     uint32_t value;
     memcpy(&value, (const char *)object + offset, sizeof(value));
