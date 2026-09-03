@@ -13,8 +13,13 @@
 #include "game_wave.h"
 #include "game_wobble.h"
 #include "game_ghost_eat.h"
+#include "game_ghost_particles.h"
 #include "game_eye_trails.h"
 #include "game_chain_trail.h"
+#include "game_afterimages.h"
+#include "game_map_effects.h"
+#include "game_danger_zoom.h"
+#include "game_frame_rate.h"
 #include "game_frame.h"
 #include "game_ghost_scan.h"
 #include "game_batch.h"
@@ -138,11 +143,14 @@ static void reuse_sprite_corner_transforms(void) {
 
 void game_perf_install_hooks(void) {
     game_wobble_install_hooks();
+    game_map_effects_install_hooks();
     game_ghost_eat_install_hooks();
+    game_ghost_particles_install_hooks();
     game_ghost_scan_install_hooks();
     /* Ghost-scan guards inspect the original update before the trail bridge. */
     game_eye_trails_install_hooks();
     game_chain_trail_install_hooks();
+    game_afterimages_install_hooks();
     uintptr_t addr = game_patch_checked_function("_ZN3sys7cSprite8SetColorEffff",
                                       0x8c, 0x78062d18u);
     if (addr)
@@ -196,5 +204,8 @@ void game_perf_install_hooks(void) {
     game_fade_install_hooks();
     game_navigation_install_hooks();
     game_math_install_hooks();
+    game_danger_zoom_install_hooks();
+    game_wobble_install_late_hooks();
+    game_frame_rate_install_hooks();
     /* so_patch flushes the module's instruction cache after all hooks. */
 }

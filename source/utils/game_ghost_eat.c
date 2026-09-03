@@ -1,5 +1,6 @@
 #include "game_ghost_eat.h"
 #include "game_patch.h"
+#include "settings.h"
 
 #include <math.h>
 #include <string.h>
@@ -52,6 +53,8 @@ static void install_outline_fade(void) {
 }
 
 void game_ghost_eat_install_hooks(void) {
+    if (!setting_ghostEatOutline)
+        return;
     uintptr_t effect = game_patch_checked_function(
         "_ZN9newPacman21cTsTaskEffectGhostEat4FuncEv", 0x3b4, 0x979f73fcu);
     if (!effect || !game_patch_checked_function(

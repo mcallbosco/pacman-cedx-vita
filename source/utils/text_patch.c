@@ -20,14 +20,17 @@ int pmcedx_patch_motion_blur_shader(char *source, int samples) {
     weight += strlen("float totalFact = ");
     if (!((strncmp(count, "8.0;", 4) == 0 && strncmp(weight, "4.5;", 4) == 0) ||
           (strncmp(count, "4.0;", 4) == 0 && strncmp(weight, "2.5;", 4) == 0) ||
-          (strncmp(count, "2.0;", 4) == 0 && strncmp(weight, "1.5;", 4) == 0)))
+          (strncmp(count, "2.0;", 4) == 0 && strncmp(weight, "1.5;", 4) == 0) ||
+          (strncmp(count, "1.0;", 4) == 0 && strncmp(weight, "1.0;", 4) == 0)))
         return 0;
 
-    char selected = samples == 8 ? '8' : samples == 2 ? '2' : '4';
+    char selected = samples == 0 ? '1' : samples == 8 ? '8' : samples == 2 ? '2' : '4';
     int changed = count[0] != selected;
     count[0] = selected;
-    /* Weights sum to (sample count + 1) / 2; retain the original brightness. */
-    weight[0] = samples == 8 ? '4' : samples == 2 ? '1' : '2';
+    /* One sample skips the offset loop and returns the original texel.
+     * Otherwise weights sum to (sample count + 1) / 2. */
+    weight[0] = samples == 0 ? '1' : samples == 8 ? '4' : samples == 2 ? '1' : '2';
+    weight[2] = samples == 0 ? '0' : '5';
     return changed;
 }
 

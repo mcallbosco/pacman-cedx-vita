@@ -1,4 +1,5 @@
 #include "game_map_shader.h"
+#include "game_map_effects.h"
 #include "glutil.h"
 #include "text_patch.h"
 #include <stdlib.h>
@@ -13,8 +14,10 @@ static GLint single_matrix, single_hsv, single_sampler;
 void game_map_shader_invalidate(GLuint program) {
     if (program != source_program)
         return;
-    if (single_program)
+    if (single_program) {
+        game_map_effects_invalidate(single_program);
         glDeleteProgram(single_program);
+    }
     single_program = 0;
     source_program = 0;
     attempted = 0;
@@ -24,7 +27,8 @@ void game_map_shader_invalidate(GLuint program) {
 }
 
 void game_map_shader_sources(GLuint program, const char *vertex, const char *fragment) {
-    if (program != 5 || !vertex || !fragment || !strstr(vertex, "col.xyz *= a_ParamLight;"))
+    if (program != 5 || !vertex || !fragment ||
+        (!strstr(vertex, "col.xyz *= a_ParamLight;") && !strstr(vertex, "col.xyz *= 1.0;")))
         return;
     const char *assignment = "v_oTexCoord2 = a_texCoordSub;";
     const char *sub = strstr(vertex, assignment);
@@ -33,6 +37,11 @@ void game_map_shader_sources(GLuint program, const char *vertex, const char *fra
     char *fs = pmcedx_single_texture_map_shader(fragment);
     if (!fs)
         return;
+    char *single_effects = game_map_effects_single_shader(fs);
+    if (single_effects) {
+        free(fs);
+        fs = single_effects;
+    }
     char *vs = strdup(vertex);
     if (!vs) {
         free(fs);
@@ -86,6 +95,7 @@ void game_map_shader_prepare(void) {
         GLint ok = 0;
         glGetProgramiv(program, GL_LINK_STATUS, &ok);
         if (ok) {
+            game_map_effects_register(program);
             source_matrix = glGetUniformLocation(source_program, "u_matScreen");
             source_hsv = glGetUniformLocation(source_program, "u_spDeltaHSV");
             source_sampler[0] = glGetUniformLocation(source_program, "u_diffuseMap2");
@@ -93,23 +103,28 @@ void game_map_shader_prepare(void) {
             single_matrix = glGetUniformLocation(program, "u_matScreen");
             single_hsv = glGetUniformLocation(program, "u_spDeltaHSV");
             single_sampler = glGetUniformLocation(program, "u_diffuseMap");
-            ok = source_matrix != -1 && single_matrix != -1 &&
+            ok = ((source_matrix == -1) == (single_matrix == -1)) &&
                  source_sampler[0] != -1 && source_sampler[1] != -1 && single_sampler != -1 &&
                  ((source_hsv == -1) == (single_hsv == -1));
             /* Unknown uniforms or active attributes retain the native path. */
             GLint uniforms = 0, attributes = 0;
             glGetProgramiv(program, GL_ACTIVE_UNIFORMS, &uniforms);
             glGetProgramiv(program, GL_ACTIVE_ATTRIBUTES, &attributes);
-            ok = ok && attributes == 4 && uniforms == (single_hsv == -1 ? 2 : 3) &&
-                 glGetAttribLocation(program, "a_ParamLight") == 0 &&
+            GLint light = glGetAttribLocation(program, "a_ParamLight");
+            ok = ok && attributes == (light == -1 ? 3 : 4) &&
+                 uniforms == 1 + (single_matrix != -1) + (single_hsv != -1) +
+                    game_map_effects_uniform_count(program) &&
+                 (light == -1 || light == 0) &&
                  glGetAttribLocation(program, "a_position") == 1 &&
                  glGetAttribLocation(program, "a_texCoord") == 2 &&
                  glGetAttribLocation(program, "a_color") == 4;
         }
         if (ok)
             single_program = program;
-        else
+        else {
+            game_map_effects_invalidate(program);
             glDeleteProgram(program);
+        }
     }
     if (vs) glDeleteShader(vs);
     if (fs) glDeleteShader(fs);
@@ -142,7 +157,7 @@ int game_map_shader_draw(GLuint program, GLfloat light, const void *vertices,
     for (unsigned i = 1; i < count / 4; ++i)
         if (endpoint(data + i * 40) != side)
             return 0;
-    if (!vglCopyUniform(source_matrix, single_matrix) ||
+    if ((single_matrix != -1 && !vglCopyUniform(source_matrix, single_matrix)) ||
         (single_hsv != -1 && !vglCopyUniform(source_hsv, single_hsv)) ||
         !vglCopyUniform(source_sampler[0], single_sampler) ||
         !vglCopyUniform(source_sampler[1], single_sampler))
@@ -158,6 +173,7 @@ int game_map_shader_draw(GLuint program, GLfloat light, const void *vertices,
     }
     vglCopyUniform(source_sampler[side], single_sampler);
     glUseProgram(single_program);
+    game_map_effects_apply(single_program);
     glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 32, compact);
     glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 32, compact + 2);
     glVertexAttribPointer(4, 4, GL_FLOAT, GL_FALSE, 32, compact + 4);

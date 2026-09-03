@@ -38,7 +38,9 @@
 
 #include "utils/glutil.h"
 #include "utils/game_map_shader.h"
+#include "utils/game_map_effects.h"
 #include "utils/game_wobble.h"
+#include "utils/game_danger_zoom.h"
 #include "utils/utils.h"
 #include "utils/logger.h"
 
@@ -417,6 +419,7 @@ static VAPStateFix vap_state_fix[16] = {0};
 static GLuint gl_current_program_fix = 0;
 
 static inline void apply_prog5_attr_remap_fix(void) {
+    game_map_effects_apply(5);
     // Program 5 attribute locations on Vita are observed as:
     // 0=a_ParamLight, 1=a_position, 2=a_texCoord, 3=a_texCoordSub, 4=a_color.
     // The game feeds position/uv/color/light as indices 0/1/2/10, so remap here.
@@ -447,6 +450,7 @@ static inline void apply_prog5_attr_remap_fix(void) {
 static void glUseProgram_fix(GLuint program) {
     gl_current_program_fix = program;
     glUseProgram(program);
+    game_map_effects_apply(program);
 }
 
 static void glVertexAttribPointer_fix(GLuint index, GLint size, GLenum type,
@@ -484,6 +488,8 @@ GLboolean gl_batch_can_index(GLsizei stride) {
 
 void gl_draw_direct_grid(const void *buffer, unsigned vertices, unsigned stride) {
     /* Retain native state setup and the map attribute remap. */
+    if (gl_current_program_fix == 5)
+        game_map_effects_apply(5);
     if (gl_current_program_fix == 5 && stride == 40 &&
         game_wobble_draw(buffer, vertices, prog5_paramlight_value)) {
         apply_prog5_attr_remap_fix();
@@ -661,6 +667,7 @@ static void dump_vertex_attrib_state(GLuint program) {
 
 static void glDrawArrays_hook(GLenum mode, GLint first, GLsizei count) {
     gl_draw_count++;
+    game_map_effects_apply(gl_current_program);
     if (gl_current_program == 5 && frame_seq_target < 0)
         frame_seq_target = gl_dbg_frame;
 
@@ -742,6 +749,7 @@ static void glDrawArrays_hook(GLenum mode, GLint first, GLsizei count) {
 
 static void glDrawElements_hook(GLenum mode, GLsizei count, GLenum type, const void *indices) {
     gl_draw_count++;
+    game_map_effects_apply(gl_current_program);
     glDrawElements(mode, count, type, indices);
 }
 
@@ -752,6 +760,7 @@ static void glUseProgram_hook(GLuint program) {
     if (gl_dbg_frame == frame_seq_target && !frame_seq_logged)
         l_info("[seq] f%d UseProgram(%d)", gl_dbg_frame, program);
     glUseProgram(program);
+    game_map_effects_apply(program);
 }
 
 static void glClear_hook(GLbitfield mask) {
@@ -768,7 +777,7 @@ static void glBindFramebuffer_hook(GLenum target, GLuint framebuffer) {
     if (target == GL_FRAMEBUFFER && (framebuffer != 0 || gl_current_program == 5 || gl_current_program == 1)) {
         l_info("[FBIND] f%d prog=%u target=0x%x fb=%u", gl_dbg_frame, gl_current_program, target, framebuffer);
     }
-    glBindFramebuffer(target, framebuffer);
+    game_danger_zoom_bind_framebuffer(target, framebuffer);
 }
 
 static GLenum glCheckFramebufferStatus_hook(GLenum target) {
@@ -783,7 +792,7 @@ static GLenum glCheckFramebufferStatus_hook(GLenum target) {
 static void glViewport_hook(GLint x, GLint y, GLsizei w, GLsizei h) {
     if (gl_dbg_frame == frame_seq_target && !frame_seq_logged)
         l_info("[seq] f%d Viewport(%d,%d,%d,%d)", gl_dbg_frame, x, y, w, h);
-    glViewport(x, y, w, h);
+    game_danger_zoom_viewport(x, y, w, h);
 }
 
 static int glFBTex_count = 0;
@@ -1401,8 +1410,8 @@ so_default_dynlib default_dynlib[] = {
         { "glBindFramebuffer", (uintptr_t)&glBindFramebuffer_hook },
         { "glBindFramebufferOES", (uintptr_t)&glBindFramebuffer_hook },
 #else
-        { "glBindFramebuffer", (uintptr_t)&glBindFramebuffer },
-        { "glBindFramebufferOES", (uintptr_t)&glBindFramebuffer },
+        { "glBindFramebuffer", (uintptr_t)&game_danger_zoom_bind_framebuffer },
+        { "glBindFramebufferOES", (uintptr_t)&game_danger_zoom_bind_framebuffer },
 #endif
         { "glBindRenderbuffer", (uintptr_t)&glBindRenderbuffer },
         { "glBindRenderbufferOES", (uintptr_t)&glBindRenderbuffer },
@@ -1561,7 +1570,7 @@ so_default_dynlib default_dynlib[] = {
         { "glGetFixedv", (uintptr_t)&ret0 },
         { "glGetFloatv", (uintptr_t)&glGetFloatv },
         { "glGetFramebufferAttachmentParameterivOES", (uintptr_t)&glGetFramebufferAttachmentParameteriv },
-        { "glGetIntegerv", (uintptr_t)&glGetIntegerv },
+        { "glGetIntegerv", (uintptr_t)&game_danger_zoom_get_integer },
         { "glGetLightfv", (uintptr_t)&ret0 },
         { "glGetLightxv", (uintptr_t)&ret0 },
         { "glGetMaterialfv", (uintptr_t)&ret0 },
@@ -1743,7 +1752,7 @@ so_default_dynlib default_dynlib[] = {
 #ifdef DEBUG_OPENGL
         { "glViewport", (uintptr_t)&glViewport_hook },
 #else
-        { "glViewport", (uintptr_t)&glViewport },
+        { "glViewport", (uintptr_t)&game_danger_zoom_viewport },
 #endif
         { "glWeightPointerOES", (uintptr_t)&ret0 },
 

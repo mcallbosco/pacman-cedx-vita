@@ -37,20 +37,80 @@ enum OptionIndex {
     OPT_MSAA,
     OPT_BUILD_TYPE,
     OPT_LOW_PERF,
+    OPT_MOTION_BLUR_ENABLED,
     OPT_MOTION_BLUR,
+    OPT_GHOST_AFTERIMAGES,
     OPT_GHOST_TRAILS,
     OPT_GHOST_CHAIN_TRAIL,
     OPT_GHOST_EYE_TRAILS,
     OPT_MAZE_WOBBLE,
+    OPT_GHOST_EAT_OUTLINE,
+    OPT_PACMAN_LIGHT,
+    OPT_POWER_PALETTE,
+    OPT_POWER_FLASH,
+    OPT_POWER_PULSE,
+    OPT_MAZE_GLOW,
+    OPT_IMPACT_RIPPLES,
+    OPT_DANGER_ZOOM,
     OPT_ALL_CONTENT,
-    OPT_DUMMY,
+    OPT_GHOST_EAT_PARTICLES,
+    OPT_FRAME_RATE,
+    OPT_OPEN_GAMEPLAY,
+    OPT_OPEN_GRAPHICS,
+    OPT_OPEN_INTENSIVE,
+    OPT_OPEN_SYSTEM,
     OPTION_COUNT
 };
 
 #define VISIBLE_OPTIONS 4
-#define BUTTON_ROW OPTION_COUNT  /* selected_row value when focus is on buttons */
+
+enum MenuPage {
+    MENU_MAIN,
+    MENU_GAMEPLAY,
+    MENU_GRAPHICS,
+    MENU_INTENSIVE,
+    MENU_SYSTEM,
+    MENU_COUNT
+};
+
+static const OptionIndex main_options[] = {
+    OPT_OPEN_GAMEPLAY, OPT_OPEN_GRAPHICS, OPT_OPEN_INTENSIVE, OPT_OPEN_SYSTEM
+};
+static const OptionIndex gameplay_options[] = {
+    OPT_GAMEPLAY_SPEED, OPT_PC_RULES, OPT_ALL_CONTENT
+};
+static const OptionIndex graphics_options[] = {
+    OPT_LOW_PERF, OPT_FRAME_RATE, OPT_GHOST_EAT_OUTLINE, OPT_PACMAN_LIGHT,
+    OPT_POWER_PALETTE, OPT_POWER_FLASH, OPT_POWER_PULSE, OPT_DANGER_ZOOM
+};
+static const OptionIndex intensive_options[] = {
+    OPT_GHOST_EAT_PARTICLES, OPT_MAZE_GLOW, OPT_MSAA, OPT_MAZE_WOBBLE, OPT_IMPACT_RIPPLES,
+    OPT_GHOST_AFTERIMAGES, OPT_GHOST_TRAILS, OPT_GHOST_CHAIN_TRAIL,
+    OPT_GHOST_EYE_TRAILS, OPT_MOTION_BLUR_ENABLED, OPT_MOTION_BLUR
+};
+static const OptionIndex system_options[] = {OPT_LANGUAGE, OPT_BUILD_TYPE};
+
+struct MenuDesc {
+    const char *title;
+    const OptionIndex *options;
+    int count;
+};
+
+template <size_t N>
+static constexpr MenuDesc menu(const char *title, const OptionIndex (&options)[N]) {
+    return {title, options, (int)N};
+}
+
+static const MenuDesc menus[MENU_COUNT] = {
+    menu("SETTINGS", main_options),
+    menu("SETTINGS / GAMEPLAY", gameplay_options),
+    menu("SETTINGS / GRAPHICS", graphics_options),
+    menu("SETTINGS / INTENSIVE GRAPHICS", intensive_options),
+    menu("SETTINGS / SYSTEM", system_options)
+};
 
 static int msaa_mode = MSAA_OFF;
+static int frame_rate = 60;
 static int pc_speed = 1;
 static int pc_rules = 1;
 static int language = SETTING_LANGUAGE_SYSTEM;
@@ -61,8 +121,19 @@ static int reduce_ghost_trails = 0;
 static int ghost_chain_trails = 0;
 static int ghost_eye_trails = 0;
 static int maze_wobble = 0;
+static int danger_zoom = 0;
+static int motion_blur = 1;
+static int ghost_afterimages = 1;
+static int ghost_eat_outline = 1;
+static int pacman_light = 0;
+static int power_palette = 0;
+static int power_flash = 0;
+static int power_pulse = 0;
+static int maze_glow = 0;
+static int impact_ripples = 0;
+static int ghost_eat_particles = 0;
 static int all_content = 0;     /* 1=unlocked, 0=normal */
-static int dummy_setting = 0;    /* placeholder setting to demo scrolling */
+static int dummy_setting = 0;    /* Preserve the legacy configuration key. */
 static bool dirty = false;
 static bool reset_holding = false;
 static bool reset_fired = false;
@@ -70,10 +141,35 @@ static uint64_t reset_started = 0;
 static float reset_progress = 0.0f;
 static uint64_t reset_notice_until = 0;
 
-static int selected_row = 0;     /* 0..OPTION_COUNT-1 = option, OPTION_COUNT = button row */
-static int selected_button = 0;  /* 0 = SAVE, 1 = EXIT */
+static MenuPage current_menu = MENU_MAIN;
+static int selected_row = 0;     /* menus[current_menu].count selects the buttons. */
+static int selected_button = 0;  /* 0 = SAVE & EXIT, 1 = BACK/EXIT */
 static int scroll_offset = 0;    /* first visible option index */
+struct MenuPosition {
+    int row, button, scroll;
+};
+static MenuPosition menu_positions[MENU_COUNT];
 static vita2d_pgf *g_font = nullptr;
+
+static void open_menu(MenuPage page) {
+    menu_positions[current_menu] = {selected_row, selected_button, scroll_offset};
+    current_menu = page;
+    const MenuPosition &position = menu_positions[page];
+    selected_row = position.row;
+    selected_button = position.button;
+    scroll_offset = position.scroll;
+}
+
+static bool option_locked(int option) {
+    if (!low_performance || option == OPT_LOW_PERF)
+        return false;
+    const MenuPage graphics_pages[] = {MENU_GRAPHICS, MENU_INTENSIVE};
+    for (MenuPage page : graphics_pages)
+        for (int i = 0; i < menus[page].count; ++i)
+            if (menus[page].options[i] == option)
+                return true;
+    return false;
+}
 
 static void log_line(const char *fmt, ...) {
     sceIoMkdir(CONFIG_DIR, 0777);
@@ -113,6 +209,7 @@ static void reset_settings() {
     pc_speed = 1;
     pc_rules = 1;
     msaa_mode = MSAA_OFF;
+    frame_rate = 60;
     build_type = 0;
     low_performance = 0;
     motion_blur_samples = 4;
@@ -120,6 +217,17 @@ static void reset_settings() {
     ghost_chain_trails = 0;
     ghost_eye_trails = 0;
     maze_wobble = 0;
+    danger_zoom = 0;
+    motion_blur = 1;
+    ghost_afterimages = 1;
+    ghost_eat_outline = 1;
+    pacman_light = 0;
+    power_palette = 0;
+    power_flash = 0;
+    power_pulse = 0;
+    maze_glow = 0;
+    impact_ripples = 0;
+    ghost_eat_particles = 0;
     all_content = 0;
     dummy_setting = 0;
 }
@@ -161,6 +269,8 @@ static void load_settings() {
     while (fscanf(f, "%63s %d\n", key, &val) == 2) {
         if (strcmp(key, "setting_msaaMode") == 0)
             msaa_mode = sanitize_msaa(val);
+        else if (strcmp(key, "setting_frameRate") == 0)
+            frame_rate = settings_sanitize_frame_rate(val);
         else if (strcmp(key, "setting_pcRules") == 0)
             pc_rules = (val != 0) ? 1 : 0;
         else if (strcmp(key, "setting_pcSpeed") == 0)
@@ -181,6 +291,28 @@ static void load_settings() {
             ghost_eye_trails = (val != 0) ? 1 : 0;
         else if (strcmp(key, "setting_mazeWobble") == 0)
             maze_wobble = (val != 0) ? 1 : 0;
+        else if (strcmp(key, "setting_dangerZoom") == 0)
+            danger_zoom = (val != 0) ? 1 : 0;
+        else if (strcmp(key, "setting_motionBlur") == 0)
+            motion_blur = (val != 0) ? 1 : 0;
+        else if (strcmp(key, "setting_ghostAfterimages") == 0)
+            ghost_afterimages = (val != 0) ? 1 : 0;
+        else if (strcmp(key, "setting_ghostEatOutline") == 0)
+            ghost_eat_outline = (val != 0) ? 1 : 0;
+        else if (strcmp(key, "setting_pacmanLight") == 0)
+            pacman_light = (val != 0) ? 1 : 0;
+        else if (strcmp(key, "setting_powerPalette") == 0)
+            power_palette = (val != 0) ? 1 : 0;
+        else if (strcmp(key, "setting_powerFlash") == 0)
+            power_flash = (val != 0) ? 1 : 0;
+        else if (strcmp(key, "setting_powerPulse") == 0)
+            power_pulse = (val != 0) ? 1 : 0;
+        else if (strcmp(key, "setting_mazeGlow") == 0)
+            maze_glow = (val != 0) ? 1 : 0;
+        else if (strcmp(key, "setting_impactRipples") == 0)
+            impact_ripples = (val != 0) ? 1 : 0;
+        else if (strcmp(key, "setting_ghostEatParticles") == 0)
+            ghost_eat_particles = (val != 0) ? 1 : 0;
         else if (strcmp(key, "setting_unlockAllContent") == 0 || strcmp(key, "setting_accessAllMissions") == 0)
             all_content = (val != 0) ? 1 : 0;
         else if (strcmp(key, "setting_dummy") == 0)
@@ -206,6 +338,7 @@ static void save_settings() {
     fprintf(f, "setting_language %d\n", settings_sanitize_language(language));
     fprintf(f, "setting_sampleSetting2 1\n");
     fprintf(f, "setting_msaaMode %d\n", sanitize_msaa(msaa_mode));
+    fprintf(f, "setting_frameRate %d\n", settings_sanitize_frame_rate(frame_rate));
     fprintf(f, "setting_buildType %d\n", (build_type == 0 || build_type == 1) ? build_type : 0);
     fprintf(f, "setting_lowPerformance %d\n", low_performance ? 1 : 0);
     fprintf(f, "setting_motionBlurSamples %d\n", settings_sanitize_motion_blur_samples(motion_blur_samples));
@@ -213,6 +346,17 @@ static void save_settings() {
     fprintf(f, "setting_ghostChainTrails %d\n", ghost_chain_trails ? 1 : 0);
     fprintf(f, "setting_ghostEyeTrails %d\n", ghost_eye_trails ? 1 : 0);
     fprintf(f, "setting_mazeWobble %d\n", maze_wobble ? 1 : 0);
+    fprintf(f, "setting_dangerZoom %d\n", danger_zoom ? 1 : 0);
+    fprintf(f, "setting_motionBlur %d\n", motion_blur ? 1 : 0);
+    fprintf(f, "setting_ghostAfterimages %d\n", ghost_afterimages ? 1 : 0);
+    fprintf(f, "setting_ghostEatOutline %d\n", ghost_eat_outline ? 1 : 0);
+    fprintf(f, "setting_pacmanLight %d\n", pacman_light ? 1 : 0);
+    fprintf(f, "setting_powerPalette %d\n", power_palette ? 1 : 0);
+    fprintf(f, "setting_powerFlash %d\n", power_flash ? 1 : 0);
+    fprintf(f, "setting_powerPulse %d\n", power_pulse ? 1 : 0);
+    fprintf(f, "setting_mazeGlow %d\n", maze_glow ? 1 : 0);
+    fprintf(f, "setting_impactRipples %d\n", impact_ripples ? 1 : 0);
+    fprintf(f, "setting_ghostEatParticles %d\n", ghost_eat_particles ? 1 : 0);
     fprintf(f, "setting_unlockAllContent %d\n", all_content ? 1 : 0);
     fprintf(f, "setting_dummy %d\n", dummy_setting ? 1 : 0);
     fclose(f);
@@ -229,12 +373,20 @@ static void draw_label(int x, int y, unsigned int color, float scale, const char
         vita2d_pgf_draw_text(g_font, x, y, color, scale, text);
 }
 
-static void draw_row(float x, float y, float w, const char *label, const char *value, bool selected) {
+static void draw_row(float x, float y, float w, const char *label, const char *value,
+                     bool selected, bool locked) {
     unsigned int bg = selected ? RGBA8(242, 210, 64, 255) : RGBA8(50, 60, 76, 255);
     unsigned int fg = selected ? RGBA8(18, 18, 18, 255) : RGBA8(236, 240, 246, 255);
     unsigned int vg = selected ? RGBA8(18, 18, 18, 255) : RGBA8(216, 220, 228, 255);
+    if (locked) {
+        bg = selected ? RGBA8(62, 70, 84, 255) : RGBA8(30, 36, 46, 255);
+        fg = vg = RGBA8(166, 174, 188, 255);
+        value = "LOCKED";
+    }
 
     vita2d_draw_rectangle(x, y, w, 58.0f, bg);
+    if (selected && locked)
+        vita2d_draw_rectangle(x, y, 4.0f, 58.0f, RGBA8(242, 210, 64, 255));
     draw_label((int)x + 18, (int)y + 38, fg, 1.0f, label);
     if (value && g_font)
         draw_label((int)(x + w) - 18 - vita2d_pgf_text_width(g_font, 1.0f, value),
@@ -253,6 +405,30 @@ static void draw_scroll_arrow_down(int cx, int cy, unsigned int color) {
     vita2d_draw_line((float)(cx - 6), (float)(cy - 4), (float)(cx + 6), (float)(cy - 4), color);
 }
 
+static const char *option_hint() {
+    const MenuDesc &page = menus[current_menu];
+    if (selected_row < page.count) {
+        if (option_locked(page.options[selected_row]))
+            return "Turn LOW PERFORMANCE MODE off in Graphics to unlock these options.";
+        switch (page.options[selected_row]) {
+            case OPT_OPEN_GAMEPLAY: return "Game speed, gameplay rules and content access.";
+            case OPT_OPEN_GRAPHICS: return "Frame rate, lighting, colors, outlines and camera effects.";
+            case OPT_FRAME_RATE: return "30 FPS reduces rendering load while keeping normal game speed.";
+            case OPT_OPEN_INTENSIVE: return "Effects and quality options that can reduce frame rate.";
+            case OPT_OPEN_SYSTEM: return "Game language and release/debug selection.";
+            case OPT_LOW_PERF: return "Disables other graphics options. Saved choices return when switched off.";
+            case OPT_GHOST_EAT_PARTICLES: return "Blue streaks and gold sparks on ghost eats. Particle count is limited.";
+            case OPT_MAZE_GLOW: return "High rendering cost. Can substantially reduce frame rate.";
+            case OPT_MSAA: return "Smooths jagged edges. Higher levels can reduce frame rate.";
+            case OPT_MOTION_BLUR_ENABLED:
+            case OPT_MOTION_BLUR: return "PC danger blur is not restored yet; these controls do not enable it.";
+            default: break;
+        }
+    }
+    return current_menu == MENU_INTENSIVE ? "Test one option at a time to compare frame rate."
+                                         : "SAVE & EXIT keeps changes from every submenu.";
+}
+
 static void render_frame() {
     vita2d_start_drawing();
     vita2d_clear_screen();
@@ -262,13 +438,14 @@ static void render_frame() {
     vita2d_draw_rectangle(52.0f, 98.0f, 856.0f, 2.0f, RGBA8(242, 210, 64, 255));
 
     draw_label(62, 52, RGBA8(244, 246, 250, 255), 1.4f, "PAC-MAN CE DX CONFIGURATION");
+    draw_label(64, 84, RGBA8(242, 210, 64, 255), 0.9f, menus[current_menu].title);
     draw_label(64, 146, RGBA8(188, 198, 218, 255), 1.0f, "D-Pad: navigate    Left/Right: change value");
     draw_label(64, 176, RGBA8(188, 198, 218, 255), 1.0f, "X: select/save    O: back/exit");
     vita2d_draw_rectangle(528.0f, 152.0f, 368.0f, 32.0f, RGBA8(50, 60, 76, 255));
     vita2d_draw_rectangle(528.0f, 182.0f, 368.0f * reset_progress, 2.0f,
                           RGBA8(242, 210, 64, 255));
     draw_label(542, 175, RGBA8(236, 240, 246, 255), 0.9f,
-               reset_fired ? "DEFAULTS RESTORED" : "L + R (1s): RESET OPTIONS");
+               reset_fired ? "DEFAULTS RESTORED" : "L + R (1s): RESET ALL");
 
     struct OptionDesc {
         const char *label;
@@ -285,16 +462,32 @@ static void render_frame() {
         {"MSAA ANTI-ALIASING",    msaa_to_string(msaa_mode)},
         {"BUILD TYPE",            build_type ? "DEBUG" : "RELEASE"},
         {"LOW PERFORMANCE MODE",  low_performance ? "ON" : "OFF"},
+        {"MOTION BLUR",            motion_blur ? "ON" : "OFF"},
         {"MOTION BLUR SAMPLES",    motion_blur_samples == 8 ? "8 (ORIGINAL)" :
                                   motion_blur_samples == 2 ? "2 (FASTEST)" : "4 (FASTER)"},
-        {"GHOST AFTERIMAGES",      reduce_ghost_trails ? "REDUCED" : "FULL"},
+        {"GHOST AFTERIMAGES",      ghost_afterimages ? "ON" : "OFF"},
+        {"GHOST AFTERIMAGE QUALITY", reduce_ghost_trails ? "REDUCED" : "FULL"},
         {"GHOST CHAIN TRAIL",      ghost_chain_trails ? "ON" : "OFF"},
         {"GHOST EYE TRAILS",       ghost_eye_trails ? "ON" : "OFF"},
         {"POWERED MAZE WOBBLE",    maze_wobble ? "ON" : "OFF"},
+        {"GHOST-EAT OUTLINE",        ghost_eat_outline ? "ON" : "OFF"},
+        {"PAC-MAN LIGHTING",         pacman_light ? "ON" : "OFF"},
+        {"POWER-UP PALETTE",         power_palette ? "ON" : "OFF"},
+        {"POWER-UP FLASHES",         power_flash ? "ON" : "OFF"},
+        {"POWER-UP PULSE",           power_pulse ? "ON" : "OFF"},
+        {"MAZE GLOW",                maze_glow ? "ON" : "OFF"},
+        {"IMPACT RIPPLES",           impact_ripples ? "ON" : "OFF"},
+        {"DANGER ZOOM",            danger_zoom ? "ON" : "OFF"},
         {"UNLOCK ALL CONTENT",   all_content ? "ON" : "OFF"},
-        {"DUMMY SETTING",         dummy_setting ? "ON" : "OFF"},
+        {"GHOST-EAT PARTICLES",    ghost_eat_particles ? "ON" : "OFF"},
+        {"FRAME RATE",            frame_rate == 30 ? "30 FPS" : "60 FPS"},
+        {"GAMEPLAY",              ">"},
+        {"GRAPHICS",              ">"},
+        {"INTENSIVE GRAPHICS",    ">"},
+        {"SYSTEM",                ">"},
     };
 
+    const MenuDesc &page = menus[current_menu];
     const float list_x = 96.0f;
     const float list_w = 768.0f;
     const int base_y = 200;
@@ -302,19 +495,21 @@ static void render_frame() {
 
     for (int slot = 0; slot < VISIBLE_OPTIONS; ++slot) {
         int idx = scroll_offset + slot;
-        if (idx >= OPTION_COUNT)
+        if (idx >= page.count)
             break;
         bool selected = (selected_row == idx);
+        const OptionDesc &option = options[page.options[idx]];
         draw_row(list_x, (float)(base_y + slot * row_height), list_w,
-                 options[idx].label, options[idx].value, selected);
+                 option.label, option.value, selected, option_locked(page.options[idx]));
     }
 
     unsigned int arrow_color = RGBA8(188, 198, 218, 255);
     int arrow_x = (int)(list_x + list_w + 16);
     if (scroll_offset > 0)
         draw_scroll_arrow_up(arrow_x, base_y + 14, arrow_color);
-    if (scroll_offset + VISIBLE_OPTIONS < OPTION_COUNT)
+    if (scroll_offset + VISIBLE_OPTIONS < page.count)
         draw_scroll_arrow_down(arrow_x, base_y + VISIBLE_OPTIONS * row_height - 14, arrow_color);
+    draw_label((int)list_x, 448, RGBA8(188, 198, 218, 255), 0.8f, option_hint());
 
     const float btn_y = 456.0f;
     const float btn_w = 376.0f;
@@ -322,8 +517,8 @@ static void render_frame() {
     const float left_x = 96.0f;
     const float right_x = 488.0f;
 
-    bool save_selected = (selected_row == BUTTON_ROW && selected_button == 0);
-    bool exit_selected = (selected_row == BUTTON_ROW && selected_button == 1);
+    bool save_selected = (selected_row == page.count && selected_button == 0);
+    bool exit_selected = (selected_row == page.count && selected_button == 1);
 
     unsigned int save_bg = save_selected ? RGBA8(242, 210, 64, 255) : RGBA8(50, 60, 76, 255);
     unsigned int save_fg = save_selected ? RGBA8(18, 18, 18, 255) : RGBA8(236, 240, 246, 255);
@@ -333,7 +528,8 @@ static void render_frame() {
     vita2d_draw_rectangle(left_x,  btn_y, btn_w, btn_h, save_bg);
     vita2d_draw_rectangle(right_x, btn_y, btn_w, btn_h, exit_bg);
     draw_label((int)left_x  + 110, (int)btn_y + 38, save_fg, 1.0f, "SAVE & EXIT");
-    draw_label((int)right_x + 150, (int)btn_y + 38, exit_fg, 1.0f, "EXIT");
+    draw_label((int)right_x + 150, (int)btn_y + 38, exit_fg, 1.0f,
+               current_menu == MENU_MAIN ? "EXIT" : "BACK");
 
     draw_label(64, 536, RGBA8(194, 200, 210, 255), 1.0f,
                sceKernelGetProcessTimeWide() < reset_notice_until
@@ -346,7 +542,8 @@ static void render_frame() {
 }
 
 static void ensure_scroll_visible() {
-    if (selected_row >= OPTION_COUNT)
+    const int count = menus[current_menu].count;
+    if (selected_row >= count)
         return;
     if (selected_row < scroll_offset)
         scroll_offset = selected_row;
@@ -354,7 +551,7 @@ static void ensure_scroll_visible() {
         scroll_offset = selected_row - VISIBLE_OPTIONS + 1;
     if (scroll_offset < 0)
         scroll_offset = 0;
-    int max_offset = OPTION_COUNT - VISIBLE_OPTIONS;
+    int max_offset = count - VISIBLE_OPTIONS;
     if (max_offset < 0)
         max_offset = 0;
     if (scroll_offset > max_offset)
@@ -362,9 +559,15 @@ static void ensure_scroll_visible() {
 }
 
 static void cycle_option(int idx, int direction) {
+    if (option_locked(idx))
+        return;
     reset_notice_until = 0;
     /* direction: +1 = forward/right, -1 = backward/left. */
     switch (idx) {
+        case OPT_FRAME_RATE:
+            frame_rate = frame_rate == 30 ? 60 : 30;
+            dirty = true;
+            break;
         case OPT_GAMEPLAY_SPEED:
             pc_speed = pc_speed ? 0 : 1;
             dirty = true;
@@ -410,20 +613,115 @@ static void cycle_option(int idx, int direction) {
             maze_wobble = maze_wobble ? 0 : 1;
             dirty = true;
             break;
+        case OPT_MOTION_BLUR_ENABLED:
+            motion_blur = motion_blur ? 0 : 1;
+            dirty = true;
+            break;
+        case OPT_GHOST_AFTERIMAGES:
+            ghost_afterimages = ghost_afterimages ? 0 : 1;
+            dirty = true;
+            break;
+        case OPT_GHOST_EAT_OUTLINE:
+            ghost_eat_outline = ghost_eat_outline ? 0 : 1;
+            dirty = true;
+            break;
+        case OPT_PACMAN_LIGHT:
+            pacman_light = pacman_light ? 0 : 1;
+            dirty = true;
+            break;
+        case OPT_POWER_PALETTE:
+            power_palette = power_palette ? 0 : 1;
+            dirty = true;
+            break;
+        case OPT_POWER_FLASH:
+            power_flash = power_flash ? 0 : 1;
+            dirty = true;
+            break;
+        case OPT_POWER_PULSE:
+            power_pulse = power_pulse ? 0 : 1;
+            dirty = true;
+            break;
+        case OPT_MAZE_GLOW:
+            maze_glow = maze_glow ? 0 : 1;
+            dirty = true;
+            break;
+        case OPT_IMPACT_RIPPLES:
+            impact_ripples = impact_ripples ? 0 : 1;
+            dirty = true;
+            break;
+        case OPT_DANGER_ZOOM:
+            danger_zoom = danger_zoom ? 0 : 1;
+            dirty = true;
+            break;
         case OPT_GHOST_EYE_TRAILS:
             ghost_eye_trails = ghost_eye_trails ? 0 : 1;
+            dirty = true;
+            break;
+        case OPT_GHOST_EAT_PARTICLES:
+            ghost_eat_particles = ghost_eat_particles ? 0 : 1;
             dirty = true;
             break;
         case OPT_ALL_CONTENT:
             all_content = all_content ? 0 : 1;
             dirty = true;
             break;
-        case OPT_DUMMY:
-            dummy_setting = dummy_setting ? 0 : 1;
-            dirty = true;
-            break;
         default:
             break;
+    }
+}
+
+static void activate_option(int direction) {
+    const OptionIndex option = menus[current_menu].options[selected_row];
+    switch (option) {
+        case OPT_OPEN_GAMEPLAY: if (direction > 0) open_menu(MENU_GAMEPLAY); break;
+        case OPT_OPEN_GRAPHICS: if (direction > 0) open_menu(MENU_GRAPHICS); break;
+        case OPT_OPEN_INTENSIVE: if (direction > 0) open_menu(MENU_INTENSIVE); break;
+        case OPT_OPEN_SYSTEM: if (direction > 0) open_menu(MENU_SYSTEM); break;
+        default: cycle_option(option, direction); break;
+    }
+}
+
+static void handle_controls(uint32_t buttons, uint32_t prev_buttons,
+                            bool &running, bool &save_on_exit) {
+    const int count = menus[current_menu].count;
+    /* Handle one action per press so entering a page cannot also edit its first row. */
+    if (pressed(buttons, prev_buttons, SCE_CTRL_CIRCLE)) {
+        if (current_menu == MENU_MAIN) {
+            save_on_exit = false;
+            running = false;
+        } else {
+            open_menu(MENU_MAIN);
+        }
+    } else if (pressed(buttons, prev_buttons, SCE_CTRL_UP)) {
+        if (selected_row > 0)
+            --selected_row;
+        ensure_scroll_visible();
+    } else if (pressed(buttons, prev_buttons, SCE_CTRL_DOWN)) {
+        if (selected_row < count)
+            ++selected_row;
+        ensure_scroll_visible();
+    } else if (pressed(buttons, prev_buttons, SCE_CTRL_CROSS)) {
+        if (selected_row != count) {
+            activate_option(+1);
+        } else if (selected_button == 0) {
+            save_on_exit = true;
+            running = false;
+        } else if (current_menu != MENU_MAIN) {
+            open_menu(MENU_MAIN);
+        } else {
+            save_on_exit = false;
+            running = false;
+        }
+    } else if (pressed(buttons, prev_buttons, SCE_CTRL_LEFT)) {
+        if (selected_row == count)
+            selected_button = 0;
+        else
+            activate_option(-1);
+    } else if (pressed(buttons, prev_buttons, SCE_CTRL_RIGHT)) {
+        if (selected_row == count)
+            selected_button = 1;
+        else
+            activate_option(+1);
     }
 }
 
@@ -460,49 +758,7 @@ int main() {
         if (update_reset_hold(buttons, sceKernelGetProcessTimeWide()))
             buttons = 0; /* Keep other controls from editing or saving mid-hold. */
 
-        if (pressed(buttons, prev_buttons, SCE_CTRL_UP)) {
-            if (selected_row == BUTTON_ROW) {
-                selected_row = OPTION_COUNT - 1;
-            } else if (selected_row > 0) {
-                selected_row--;
-            }
-            ensure_scroll_visible();
-        }
-        if (pressed(buttons, prev_buttons, SCE_CTRL_DOWN)) {
-            if (selected_row < OPTION_COUNT - 1) {
-                selected_row++;
-            } else if (selected_row == OPTION_COUNT - 1) {
-                selected_row = BUTTON_ROW;
-            }
-            ensure_scroll_visible();
-        }
-
-        if (pressed(buttons, prev_buttons, SCE_CTRL_LEFT)) {
-            if (selected_row == BUTTON_ROW)
-                selected_button = 0;
-            else
-                cycle_option(selected_row, -1);
-        }
-        if (pressed(buttons, prev_buttons, SCE_CTRL_RIGHT)) {
-            if (selected_row == BUTTON_ROW)
-                selected_button = 1;
-            else
-                cycle_option(selected_row, +1);
-        }
-
-        if (pressed(buttons, prev_buttons, SCE_CTRL_CROSS)) {
-            if (selected_row == BUTTON_ROW) {
-                save_on_exit = (selected_button == 0);
-                running = false;
-            } else {
-                cycle_option(selected_row, +1);
-            }
-        }
-
-        if (pressed(buttons, prev_buttons, SCE_CTRL_CIRCLE)) {
-            save_on_exit = false;
-            running = false;
-        }
+        handle_controls(buttons, prev_buttons, running, save_on_exit);
 
         render_frame();
         prev_buttons = pad.buttons;

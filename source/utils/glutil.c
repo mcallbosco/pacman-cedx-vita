@@ -10,6 +10,9 @@
 #include "utils/glutil.h"
 #include "utils/game_shader.h"
 #include "utils/game_map_shader.h"
+#include "utils/game_map_effects.h"
+#include "utils/game_ghost_particles.h"
+#include "utils/game_frame_rate.h"
 
 #include "utils/utils.h"
 #include "utils/dialog.h"
@@ -171,10 +174,15 @@ void gl_init() {
     /* Temporary geometry uses rotating pools, with allocation fallback for peaks. */
     vglSetVertexPoolSize(8 * 1024 * 1024);
     vglInitExtended(0, 960, 544, 24 * 1024 * 1024, gxm_msaa_mode);
+    eglSwapInterval(EGL_DEFAULT_DISPLAY, game_frame_rate_render_ticks());
 }
 
 void gl_swap() {
+    if (!game_frame_rate_should_render())
+        return;
     vglSwapBuffers(GL_FALSE);
+    game_map_effects_next_frame();
+    game_ghost_particles_next_frame();
 }
 
 void glShaderSource_soloader(GLuint shader, GLsizei count,
@@ -226,11 +234,17 @@ void glShaderSource_soloader(GLuint shader, GLsizei count,
         }
     }
     str[clean_len] = '\0';
-    pmcedx_patch_motion_blur_shader(str, setting_motionBlurSamples);
+    pmcedx_patch_motion_blur_shader(str, setting_motionBlur ? setting_motionBlurSamples : 0);
     char *optimized_map = pmcedx_optimize_map_shader(str);
     if (optimized_map) {
         free(str);
         str = optimized_map;
+        clean_len = strlen(str);
+    }
+    char *map_effects = game_map_effects_shader(str);
+    if (map_effects) {
+        free(str);
+        str = map_effects;
         clean_len = strlen(str);
     }
     track_shader_source(shader, str, clean_len);
@@ -265,6 +279,7 @@ GLuint glCreateProgram_soloader(void) {
 }
 
 void glDeleteProgram_soloader(GLuint program) {
+    game_map_effects_invalidate(program);
     game_map_shader_invalidate(program);
     game_shader_invalidate_program(program);
     glDeleteProgram(program);
@@ -293,6 +308,7 @@ void glAttachShader_soloader(GLuint program, GLuint shader) {
 
 static int prog5_link_count = 0;
 void glLinkProgram_soloader(GLuint program) {
+    game_map_effects_invalidate(program);
     game_map_shader_invalidate(program);
     game_shader_invalidate_program(program);
 #ifdef DEBUG_OPENGL
@@ -301,6 +317,22 @@ void glLinkProgram_soloader(GLuint program) {
     if (program == 5) prog5_link_count++;
     l_info("glLinkProgram: linking program %u (link #%d for prog5)...",
            program, program == 5 ? prog5_link_count : 0);
+    /* Bind every recognized map variant before its first link, including the
+     * installer variant with inactive brightness and projection inputs. */
+    if (program == 5 && program < MAX_DEBUG_PROGRAMS) {
+        GLuint vs = program_debug[program].vertex_shader;
+        GLuint fs = program_debug[program].fragment_shader;
+        if (vs < MAX_DEBUG_SHADERS && fs < MAX_DEBUG_SHADERS &&
+            shader_debug[vs].source && shader_debug[fs].source &&
+            strstr(shader_debug[vs].source, "v_oTexCoord2 = a_texCoordSub;") &&
+            strstr(shader_debug[fs].source, "float maska = base.a;")) {
+            glBindAttribLocation(program, 0, "a_ParamLight");
+            glBindAttribLocation(program, 1, "a_position");
+            glBindAttribLocation(program, 2, "a_texCoord");
+            glBindAttribLocation(program, 3, "a_texCoordSub");
+            glBindAttribLocation(program, 4, "a_color");
+        }
+    }
     glLinkProgram(program);
     l_info("glLinkProgram: link call returned for program %u", program);
     if (program == 5 && program < MAX_DEBUG_PROGRAMS) {
@@ -330,6 +362,9 @@ void glLinkProgram_soloader(GLuint program) {
         GLuint fs = program_debug[program].fragment_shader;
         if (vs < MAX_DEBUG_SHADERS && fs < MAX_DEBUG_SHADERS)
             game_map_shader_sources(program, shader_debug[vs].source, shader_debug[fs].source);
+        if (fs < MAX_DEBUG_SHADERS && shader_debug[fs].source &&
+            strstr(shader_debug[fs].source, "PMC_MAP_EFFECTS"))
+            game_map_effects_register(program);
     }
     if (linked == GL_FALSE) {
         GLint log_len = 0;

@@ -121,6 +121,7 @@ void soloader_init_all() {
     }
 
     settings_load();
+    settings_apply_runtime_overrides();
     l_success("Settings loaded.");
 
     so_relocate(&so_mod);

@@ -14,6 +14,7 @@
 #include "utils/init.h"
 #include "utils/glutil.h"
 #include "utils/settings.h"
+#include "utils/game_frame_rate.h"
 #include "utils/logger.h"
 
 #include <psp2/kernel/threadmgr.h>
@@ -676,6 +677,7 @@ int main() {
     int      _prof_last_summary_frame = 0;
 #endif
     while (1) {
+        game_frame_rate_begin_tick();
         controls_poll_touch();
         process_input();
 
