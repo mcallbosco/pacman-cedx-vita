@@ -18,6 +18,7 @@ static float player[4], power[4], flash;
 static int snapshot_dirty = 1;
 
 enum { MAP_EFFECT_PROGRAMS = 16, GHOST_RECORDS = 64, GHOST_LIGHTS = 4 };
+static unsigned pending_programs;
 /* Two vec4s per light: screen position/radius/fade, then RGB. No task pointers
  * or additional textures are retained by the lighting pass. */
 static float ghost_lights[GHOST_LIGHTS * 2][4], ghost_fade[GHOST_RECORDS];
@@ -188,6 +189,7 @@ static void update(void) {
     if (!snapshot_dirty)
         return;
     snapshot_dirty = 0;
+    pending_programs = (1u << MAP_EFFECT_PROGRAMS) - 1;
     memset(player, 0, sizeof(player));
     memset(power, 0, sizeof(power));
     memset(ghost_lights, 0, sizeof(ghost_lights));
@@ -238,6 +240,7 @@ void game_map_effects_register(GLuint program) {
                 break;
     if (!program || slot == MAP_EFFECT_PROGRAMS)
         return;
+    pending_programs |= 1u << slot;
     programs[slot].program = program;
     programs[slot].player = glGetUniformLocation(program, "u_pmcMapPlayer");
     programs[slot].power = glGetUniformLocation(program, "u_pmcMapPower");
@@ -267,12 +270,18 @@ void game_map_effects_apply(GLuint program) {
     if (slot == MAP_EFFECT_PROGRAMS)
         return;
     update();
+    /* These uniforms belong only to this effect pass. Program switches retain
+     * them until a new snapshot, a pellet retrigger, or registration. */
+    unsigned bit = 1u << slot;
+    if (!(pending_programs & bit))
+        return;
     if (programs[slot].player != -1)
         glUniform4fv(programs[slot].player, 1, player);
     if (programs[slot].power != -1)
         glUniform4fv(programs[slot].power, 1, power);
     if (programs[slot].ghosts != -1)
         glUniform4fv(programs[slot].ghosts, GHOST_LIGHTS * 2, &ghost_lights[0][0]);
+    pending_programs &= ~bit;
 }
 
 static char *replace(const char *source, const char *from, const char *to) {

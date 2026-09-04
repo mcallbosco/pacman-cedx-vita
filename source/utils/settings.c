@@ -69,13 +69,13 @@ void settings_reset() {
     setting_lowPerformance = false;
     setting_unlockAllContent = false;
     setting_motionBlurSamples = 4;
-    setting_reduceGhostTrails = false;
+    setting_reduceGhostTrails = true;
     setting_ghostChainTrails = false;
     setting_ghostEyeTrails = false;
     setting_mazeWobble = false;
     setting_dangerZoom = false;
-    setting_motionBlur = true;
-    setting_ghostAfterimages = true;
+    setting_motionBlur = false;
+    setting_ghostAfterimages = false;
     setting_ghostEatOutline = true;
     setting_pacmanLight = false;
     setting_powerPalette = false;

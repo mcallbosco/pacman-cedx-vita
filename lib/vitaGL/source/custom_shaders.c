@@ -443,6 +443,55 @@ typedef struct {
 static shader shaders[MAX_CUSTOM_SHADERS];
 static program progs[MAX_CUSTOM_PROGRAMS];
 
+/* Reuse an identical successful layout request. The shader patcher retains
+ * these programs until shader unregister; this cache owns no extra reference.
+ * Vertex data and GXM program/stream bindings still update on every draw. */
+#define DRAW_LAYOUT_CACHE_SIZE 32
+static struct {
+	program *owner;
+	SceGxmShaderPatcher *patcher;
+	SceGxmShaderPatcherId shader_id;
+	SceGxmVertexProgram *vprog;
+	GLuint count;
+	SceGxmVertexAttribute attributes[VERTEX_ATTRIBS_NUM];
+	SceGxmVertexStream streams[VERTEX_ATTRIBS_NUM];
+} draw_layouts[DRAW_LAYOUT_CACHE_SIZE];
+
+static void invalidateDrawLayout(program *p) {
+	draw_layouts[(p - progs) % DRAW_LAYOUT_CACHE_SIZE].owner = NULL;
+}
+
+static void patchDrawVertexProgram(program *p, const SceGxmVertexAttribute *attributes,
+		const SceGxmVertexStream *streams) {
+	typeof(draw_layouts[0]) *cached = &draw_layouts[(p - progs) % DRAW_LAYOUT_CACHE_SIZE];
+	size_t attr_bytes = p->attr_num * sizeof(*attributes);
+	size_t stream_bytes = p->attr_num * sizeof(*streams);
+	if (cached->owner == p && cached->patcher == gxm_shader_patcher &&
+		cached->shader_id == p->vshader->id && cached->count == p->attr_num &&
+		!memcmp(cached->attributes, attributes, attr_bytes) &&
+		!memcmp(cached->streams, streams, stream_bytes)) {
+		p->vprog = cached->vprog;
+		return;
+	}
+	cached->owner = NULL;
+	int result = sceGxmShaderPatcherCreateVertexProgram(gxm_shader_patcher,
+		p->vshader->id, attributes, p->attr_num, streams, p->attr_num, &p->vprog);
+#ifdef LOG_ERRORS
+	if (result)
+		vgl_log("Vertex shader patching failed (%s) on shader 0x%X with %d attributes and %d streams.\n",
+			get_gxm_error_literal(result), p->vshader->id, p->attr_num, p->attr_num);
+#endif
+	if (!result && p->vprog && p->attr_num <= VERTEX_ATTRIBS_NUM) {
+		cached->owner = p;
+		cached->patcher = gxm_shader_patcher;
+		cached->shader_id = p->vshader->id;
+		cached->vprog = p->vprog;
+		cached->count = p->attr_num;
+		memcpy(cached->attributes, attributes, attr_bytes);
+		memcpy(cached->streams, streams, stream_bytes);
+	}
+}
+
 #ifdef HAVE_SHARK_LOG
 static char *shark_log = NULL;
 #endif
@@ -463,6 +512,9 @@ void release_shader(shader *s) {
 	// Deallocating shader and unregistering it from sceGxmShaderPatcher
 	if (s->valid) {
 		if (s->prog) {
+			for (int i = 0; i < DRAW_LAYOUT_CACHE_SIZE; i++)
+				if (draw_layouts[i].shader_id == s->id)
+					draw_layouts[i].owner = NULL;
 			sceGxmShaderPatcherForceUnregisterProgram(gxm_shader_patcher, s->id);
 			vgl_free((void *)s->prog);
 			while (s->mat) {
@@ -744,6 +796,8 @@ static inline __attribute__((always_inline)) void compile_shader(shader *s, GLbo
 }
 
 void resetCustomShaders(void) {
+	for (int i = 0; i < DRAW_LAYOUT_CACHE_SIZE; i++)
+		draw_layouts[i].owner = NULL;
 	// Init custom shaders
 	for (int i = 0; i < MAX_CUSTOM_SHADERS; i++) {
 		shaders[i].valid = GL_FALSE;
@@ -942,7 +996,7 @@ void _glMultiDrawArrays_CustomShadersIMPL(SceGxmPrimitiveType gxm_p, uint16_t *i
 #endif
 
 	// Uploading new vertex program
-	patchVertexProgram(gxm_shader_patcher, p->vshader->id, attributes, p->attr_num, streams, p->attr_num, &p->vprog);
+	patchDrawVertexProgram(p, attributes, streams);
 	sceGxmSetVertexProgram(gxm_context, p->vprog);
 
 	// Uploading both fragment and vertex uniforms data
@@ -1197,7 +1251,7 @@ GLboolean _glDrawArrays_CustomShadersIMPL(GLint first, GLsizei count, GLboolean 
 #endif
 
 	// Uploading new vertex program
-	patchVertexProgram(gxm_shader_patcher, p->vshader->id, attributes, p->attr_num, streams, p->attr_num, &p->vprog);
+	patchDrawVertexProgram(p, attributes, streams);
 	sceGxmSetVertexProgram(gxm_context, p->vprog);
 
 	// Uploading both fragment and vertex uniforms data
@@ -1471,7 +1525,7 @@ GLboolean _glDrawElements_CustomShadersIMPL(uint16_t *idx_buf, GLsizei count, ui
 #endif
 
 	// Uploading new vertex program
-	patchVertexProgram(gxm_shader_patcher, p->vshader->id, attributes, p->attr_num, streams, p->attr_num, &p->vprog);
+	patchDrawVertexProgram(p, attributes, streams);
 	sceGxmSetVertexProgram(gxm_context, p->vprog);
 
 	// Uploading both fragment and vertex uniforms data
@@ -1927,6 +1981,7 @@ GLuint glCreateProgram(void) {
 		// Program slot found, reserving and initializing it
 		if (!(progs[i - 1].status)) {
 			res = i--;
+			invalidateDrawLayout(&progs[i]);
 			progs[i].status = PROG_UNLINKED;
 			progs[i].attr_num = 0;
 #ifdef ENABLE_LEGACY_PIPELINE
@@ -2049,6 +2104,7 @@ void glDeleteProgram(GLuint prog) {
 	}
 	// Grabbing passed program
 	program *p = &progs[prog - 1];
+	invalidateDrawLayout(p);
 
 	// Releasing both vertex and fragment programs from sceGxmShaderPatcher
 	if (p->status) {
@@ -2179,6 +2235,7 @@ void glLinkProgram(GLuint progr) {
 	}
 	// Grabbing passed program
 	program *p = &progs[progr - 1];
+	invalidateDrawLayout(p);
 
 	// vitaGL doesn't support re-linking of already linked programs.
 	// Early exit before any postponed GLSL work to avoid touching stale state.

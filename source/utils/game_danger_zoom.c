@@ -8,7 +8,8 @@
 
 #pragma GCC optimize ("no-fast-math", "fp-contract=off")
 
-static so_hook draw_hook;
+static uintptr_t draw_resume __attribute__((used));
+static void (*sprite_draw_reset)(void) __attribute__((used));
 static int (*is_game)(void), (*is_preview)(void), (*is_paused)(void);
 static int (*slow_type)(void);
 static float (*slow_rate)(void);
@@ -104,6 +105,21 @@ void game_danger_zoom_get_integer(GLenum name, GLint *value) {
         glGetIntegerv(name, value);
 }
 
+/* Replay the checked prologue and displaced call. The native epilogue
+ * unwinds this frame, so the draw entry stays patched throughout play. */
+static void __attribute__((naked, noinline)) draw_original(void) {
+    __asm__(
+        "push {r7, lr}\n"
+        "mov r7, sp\n"
+        "sub sp, #8\n"
+        "ldr ip, =sprite_draw_reset\n"
+        "ldr ip, [ip]\n"
+        "blx ip\n"
+        "ldr ip, =draw_resume\n"
+        "ldr ip, [ip]\n"
+        "bx ip\n");
+}
+
 static void draw_zoom(void) {
     int enabled = update_zoom() && *graphics;
     if (enabled) {
@@ -114,9 +130,7 @@ static void draw_zoom(void) {
         drawing = 1;
         apply_viewport();
     }
-    so_hook_unpatch(&draw_hook);
-    ((void (*)(void))draw_hook.thumb_addr)();
-    so_hook_repatch(&draw_hook);
+    draw_original();
     if (enabled) {
         /* Submit the final game batch before returning to the UI viewport. */
         end_batches(*graphics);
@@ -130,6 +144,8 @@ void game_danger_zoom_install_hooks(void) {
         return;
     uintptr_t draw = game_patch_checked_function(
         "_ZN9newPacman8LoopDrawEv", 0xa0, 0x79998f8du);
+    sprite_draw_reset = (void *)game_patch_checked_function(
+        "_ZN3sys7cSprite15SpriteDrawResetEv", 0x2c, 0xa5e78769u);
     is_game = (void *)game_patch_checked_function(
         "_ZN9newPacman15cTsTaskSequence6IsGameEv", 0x14, 0x476f8a74u);
     is_preview = (void *)game_patch_checked_function(
@@ -144,11 +160,12 @@ void game_danger_zoom_install_hooks(void) {
         "_ZN3sys8Graphics10EndBatchesEv", 0xc, 0x87cf7ea5u);
     graphics = (void *)so_symbol(&so_mod, "_ZN3sys11g_pGraphicsE");
     pacman = (void *)so_symbol(&so_mod, "_ZN9newPacman17CStaticEffectInfo6pacmanE");
-    if (!draw || !is_game || !is_preview || !is_paused || !slow_type || !slow_rate ||
+    if (!draw || !sprite_draw_reset || !is_game || !is_preview || !is_paused || !slow_type || !slow_rate ||
         !end_batches || !graphics || !pacman || !game_patch_checked_function(
             "_ZN9newPacman10cSlowSpeed4FuncEv", 0x384, 0xc53fd9a1u) ||
         !game_patch_checked_function(
             "_ZN9newPacman13cOnPacmanTask4FuncEv", 0xef0, 0x00ae5623u))
         return;
-    draw_hook = hook_addr(draw, (uintptr_t)draw_zoom);
+    draw_resume = draw + 0x0a;
+    hook_addr(draw, (uintptr_t)draw_zoom);
 }

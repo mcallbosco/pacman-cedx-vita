@@ -208,6 +208,7 @@ add_executable(${CMAKE_PROJECT_NAME}
                source/utils/game_eye_trails.c
                source/utils/game_chain_trail.c
                source/utils/game_afterimages.c
+               source/utils/game_int_vector.c
                source/utils/game_map_effects.c
                source/utils/game_danger_zoom.c
                source/utils/game_frame_rate.c

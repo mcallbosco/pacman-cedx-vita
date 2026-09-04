@@ -159,8 +159,8 @@ int game_map_shader_draw(GLuint program, GLfloat light, const void *vertices,
             return 0;
     if ((single_matrix != -1 && !vglCopyUniform(source_matrix, single_matrix)) ||
         (single_hsv != -1 && !vglCopyUniform(source_hsv, single_hsv)) ||
-        !vglCopyUniform(source_sampler[0], single_sampler) ||
-        !vglCopyUniform(source_sampler[1], single_sampler))
+        !vglCopyUniform(source_sampler[1 - side], single_sampler) ||
+        !vglCopyUniform(source_sampler[side], single_sampler))
         return 0;
 
     uint32_t compact[64 * 4 * 8];
@@ -171,7 +171,6 @@ int game_map_shader_draw(GLuint program, GLfloat light, const void *vertices,
         memcpy(dst + 2, src + (side ? 2 : 4), 8);
         memcpy(dst + 4, src + 6, 16);
     }
-    vglCopyUniform(source_sampler[side], single_sampler);
     glUseProgram(single_program);
     game_map_effects_apply(single_program);
     glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 32, compact);

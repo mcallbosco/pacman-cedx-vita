@@ -20,7 +20,7 @@ enum { WOBBLE_COLUMNS = 64, WOBBLE_ROWS = 36, WOBBLE_WORDS = 10,
        WOBBLE_VERTICES = WOBBLE_COLUMNS * WOBBLE_ROWS * 4,
        RIPPLE_CAPACITY = 2, RIPPLE_LIFE = 32 };
 
-static so_hook horizontal_hook;
+static uintptr_t horizontal_resume __attribute__((used));
 static const unsigned char *wobble_pacman;
 static int (*wobble_is_game)(void);
 static int (*wobble_is_preview)(void);
@@ -28,7 +28,9 @@ static float wobble_amplitude, wobble_phase, wobble_wavelength;
 static float *wobble_vertices;
 static int wobble_attempted;
 static int (*wobble_is_paused)(void);
-static so_hook ripple_event_hook, ripple_loop_hook;
+static uintptr_t ripple_event_resume __attribute__((used));
+static uintptr_t ripple_loop_resume __attribute__((used));
+static uintptr_t ripple_pause_address __attribute__((used));
 static uintptr_t ripple_loop_address;
 typedef struct { float x, y, strength; unsigned age; } ImpactRipple;
 static ImpactRipple ripples[RIPPLE_CAPACITY];
@@ -47,8 +49,49 @@ static unsigned word(const void *object, unsigned offset) {
     return value;
 }
 
+/* Replay checked entry instructions and keep each installed hook in place.
+ * This avoids rewriting executable memory and flushing caches during play. */
+static void __attribute__((naked, noinline)) horizontal_original(float amplitude,
+                                                               float period,
+                                                               float wavelength) {
+    __asm__ volatile(
+        "sub sp, #28\n"
+        "vmov s0, r2\n"
+        "vmov s2, r1\n"
+        "ldr ip, =horizontal_resume\n"
+        "ldr ip, [ip]\n"
+        "bx ip\n"
+        ".ltorg\n");
+}
+
+static void __attribute__((naked, noinline)) ripple_event_original(void *event) {
+    __asm__ volatile(
+        "push {r7, lr}\n"
+        "mov r7, sp\n"
+        "sub sp, #16\n"
+        "mov r1, r0\n"
+        "ldr ip, =ripple_event_resume\n"
+        "ldr ip, [ip]\n"
+        "bx ip\n"
+        ".ltorg\n");
+}
+
+static void __attribute__((naked, noinline)) ripple_loop_original(void) {
+    __asm__ volatile(
+        "push {r7, lr}\n"
+        "mov r7, sp\n"
+        "sub sp, #16\n"
+        /* The original literal load and PC addition address the pause flag. */
+        "ldr r0, =ripple_pause_address\n"
+        "ldr r0, [r0]\n"
+        "ldr ip, =ripple_loop_resume\n"
+        "ldr ip, [ip]\n"
+        "bx ip\n"
+        ".ltorg\n");
+}
+
 static int ripple_scene(void) {
-    return setting_impactRipples && ripple_loop_hook.thumb_addr && wobble_pacman && wobble_is_game() &&
+    return setting_impactRipples && ripple_loop_resume && wobble_pacman && wobble_is_game() &&
         !wobble_is_preview() && !wobble_is_paused() && (wobble_pacman[30] & 1);
 }
 
@@ -72,9 +115,7 @@ static void ripple_event(void *event) {
             ++ripple_version;
         }
     }
-    so_hook_unpatch(&ripple_event_hook);
-    ((void (*)(void *))ripple_event_hook.thumb_addr)(event);
-    so_hook_repatch(&ripple_event_hook);
+    ripple_event_original(event);
 }
 
 static void ripple_loop(void) {
@@ -89,9 +130,7 @@ static void ripple_loop(void) {
         }
     }
     ++ripple_version;
-    so_hook_unpatch(&ripple_loop_hook);
-    ((void (*)(void))ripple_loop_hook.thumb_addr)();
-    so_hook_repatch(&ripple_loop_hook);
+    ripple_loop_original();
 }
 
 static void install_ripples(void) {
@@ -117,7 +156,8 @@ static void install_ripples(void) {
         !game_patch_checked_function("_ZN9newPacman13cOnPacmanTask12OnPacmanBombEv",
             0x634, 0x4c85fa76u))
         return;
-    ripple_event_hook = hook_addr(event, (uintptr_t)ripple_event);
+    ripple_event_resume = event + 8;
+    hook_addr(event, (uintptr_t)ripple_event);
     ripple_loop_address = loop;
 }
 
@@ -125,15 +165,16 @@ void game_wobble_install_late_hooks(void) {
     /* The eye-trail installer also checks LoopFunc. Attach only after it has
      * completed, and reject an intervening change to that shared caller. */
     if (ripple_loop_address && game_patch_checked_code(ripple_loop_address,
-            "impact ripple update", 0xc4, 0xdf9819cau))
-        ripple_loop_hook = hook_addr(ripple_loop_address, (uintptr_t)ripple_loop);
+            "impact ripple update", 0xc4, 0xdf9819cau)) {
+        uintptr_t code = ripple_loop_address & ~(uintptr_t)1;
+        ripple_pause_address = code + 8 + word((void *)code, 0xbc);
+        ripple_loop_resume = ripple_loop_address + 0xa;
+        hook_addr(ripple_loop_address, (uintptr_t)ripple_loop);
+    }
 }
 
 static void horizontal_wave(float amplitude, float period, float wavelength) {
-    /* Use the typed softfp call: an unprototyped call would promote floats. */
-    so_hook_unpatch(&horizontal_hook);
-    ((void (*)(float, float, float))horizontal_hook.thumb_addr)(amplitude, period, wavelength);
-    so_hook_repatch(&horizontal_hook);
+    horizontal_original(amplitude, period, wavelength);
     if (!isfinite(amplitude) || !isfinite(period) || !isfinite(wavelength) ||
         amplitude < 1.0f || period < 1.0f || wavelength < 30.0f) {
         wobble_amplitude = 0.0f;
@@ -163,8 +204,10 @@ void game_wobble_install_hooks(void) {
     wobble_pacman = (void *)so_symbol(&so_mod,
         "_ZN9newPacman17CStaticEffectInfo6pacmanE");
     if (wobble_pacman) {
-        if (setting_mazeWobble)
-            horizontal_hook = hook_addr(wave, (uintptr_t)horizontal_wave);
+        if (setting_mazeWobble) {
+            horizontal_resume = wave + 0xa;
+            hook_addr(wave, (uintptr_t)horizontal_wave);
+        }
         install_ripples();
     }
 }
@@ -210,31 +253,38 @@ static void prepare_ripple_grid(void) {
     /* Two compact radial pulses on one shared logical grid. Squared-distance
      * rejection avoids square roots outside the moving annulus; the smooth
      * polynomial needs no per-vertex trigonometry or new rendering pass. */
-    for (unsigned row = 0; row <= WOBBLE_ROWS; ++row) {
-        for (unsigned col = 0; col <= WOBBLE_COLUMNS; ++col) {
-            float x = col * 20.0f, y = row * 20.0f;
-            float ox = 0.0f, oy = 0.0f;
-            for (unsigned i = 0; i < ripple_count; ++i) {
-                const ImpactRipple *wave = &ripples[i];
-                float radius = 24.0f + wave->age * 13.0f;
-                float dx = x - wave->x, dy = y - wave->y;
+    memset(ripple_grid, 0, sizeof(ripple_grid));
+    for (unsigned i = 0; i < ripple_count; ++i) {
+        const ImpactRipple *wave = &ripples[i];
+        float radius = 24.0f + wave->age * 13.0f;
+        float inner = radius > 64.0f ? radius - 64.0f : 0.0f;
+        float outer = radius + 64.0f;
+        float inner2 = inner * inner, outer2 = outer * outer;
+        float fade = 1.0f - (float)wave->age / RIPPLE_LIFE;
+        float strength = 3.493856f * wave->strength * fade;
+        unsigned first_col = wave->x > outer ? (unsigned)((wave->x - outer) / 20.0f) : 0;
+        unsigned first_row = wave->y > outer ? (unsigned)((wave->y - outer) / 20.0f) : 0;
+        unsigned last_col = (unsigned)((wave->x + outer) / 20.0f);
+        unsigned last_row = (unsigned)((wave->y + outer) / 20.0f);
+        if (last_col > WOBBLE_COLUMNS) last_col = WOBBLE_COLUMNS;
+        if (last_row > WOBBLE_ROWS) last_row = WOBBLE_ROWS;
+        /* Visit only the enclosing square, retaining the original annulus
+         * test and pulse order wherever two rings overlap. */
+        for (unsigned row = first_row; row <= last_row; ++row) {
+            float dy = row * 20.0f - wave->y;
+            for (unsigned col = first_col; col <= last_col; ++col) {
+                float dx = col * 20.0f - wave->x;
                 float distance2 = dx * dx + dy * dy;
-                float inner = radius > 64.0f ? radius - 64.0f : 0.0f;
-                float outer = radius + 64.0f;
-                if (distance2 <= inner * inner || distance2 >= outer * outer ||
+                if (distance2 <= inner2 || distance2 >= outer2 ||
                     distance2 < 0.0001f)
                     continue;
                 float distance = sqrtf(distance2);
                 float q = (distance - radius) / 64.0f;
                 float envelope = 1.0f - q * q;
-                float fade = 1.0f - (float)wave->age / RIPPLE_LIFE;
-                float displacement = 3.493856f * wave->strength * fade *
-                    q * envelope * envelope / distance;
-                ox += dx * displacement;
-                oy += dy * displacement;
+                float displacement = strength * q * envelope * envelope / distance;
+                ripple_grid[row][col][0] += dx * displacement;
+                ripple_grid[row][col][1] += dy * displacement;
             }
-            ripple_grid[row][col][0] = ox;
-            ripple_grid[row][col][1] = oy;
         }
     }
     ripple_grid_version = ripple_version;
@@ -304,8 +354,16 @@ static void build_wobble_mesh(const float *vertices, unsigned count,
             }
         }
         for (unsigned row = 0; row < WOBBLE_ROWS; ++row) {
+            /* Adjacent rows share these fully transformed corners, including
+             * their UVs and ripple displacement. Generate each edge once. */
+            if (row) {
+                const float *previous = out - 40;
+                memcpy(out, previous + 30, 40);
+                memcpy(out + 10, previous + 20, 40);
+                out += 20;
+            }
             /* TL/TR/BR/BL, matching the native maze and GL_QUADS indices. */
-            for (unsigned corner = 0; corner < 4; ++corner) {
+            for (unsigned corner = row ? 2 : 0; corner < 4; ++corner) {
                 unsigned side = corner == 1 || corner == 2;
                 unsigned edge = row + (corner >= 2);
                 float t = (float)edge / WOBBLE_ROWS;

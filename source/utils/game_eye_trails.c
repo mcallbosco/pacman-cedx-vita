@@ -10,12 +10,12 @@
 enum { TRAIL_CAPACITY = 512, TRAIL_LIFE = 10 };
 typedef struct {
     float x, y, alpha;
-    unsigned life;
+    unsigned born;
 } EyeTrail;
 
 /* Snapshot positions and opacity: trails never retain a ghost task pointer. */
 static EyeTrail trails[TRAIL_CAPACITY];
-static unsigned trail_first, trail_count;
+static unsigned trail_first, trail_count, trail_tick;
 static void **trail_sprite;
 static int (*ghost_is_eye)(void *ghost);
 static int (*trail_is_game)(void);
@@ -40,7 +40,7 @@ static uint32_t word(const void *object, unsigned offset) {
 }
 
 static void eye_trails_reset(void) {
-    trail_first = trail_count = 0;
+    trail_first = trail_count = trail_tick = 0;
     /* Keep native group-sprite setup, texture, blend mode and depth. */
     so_hook_unpatch(&trail_reset_hook);
     ((void (*)(void))trail_reset_hook.thumb_addr)();
@@ -48,9 +48,10 @@ static void eye_trails_reset(void) {
 }
 
 static void eye_trails_update(void) {
-    for (unsigned i = 0; i < trail_count; ++i)
-        --trails[(trail_first + i) % TRAIL_CAPACITY].life;
-    while (trail_count && !trails[trail_first].life) {
+    ++trail_tick;
+    /* Equal lifetimes keep the ring in expiry order. Unsigned subtraction
+     * also preserves age when the tick counter wraps. */
+    while (trail_count && trail_tick - trails[trail_first].born >= TRAIL_LIFE) {
         trail_first = (trail_first + 1) % TRAIL_CAPACITY;
         --trail_count;
     }
@@ -71,7 +72,7 @@ static void eye_trails_draw(void) {
         if (capacity < 2 || used >= capacity - 1)
             break;
         const EyeTrail *trail = &trails[(trail_first + i) % TRAIL_CAPACITY];
-        float fade = (float)trail->life / TRAIL_LIFE;
+        float fade = (float)(TRAIL_LIFE - (trail_tick - trail->born)) / TRAIL_LIFE;
         float position[] = {trail->x, trail->y};
         /* The native eye controller uses this blue tint and ten-tick fade. */
         float color[] = {0.2f, 0.8f * fade, 1.0f, trail->alpha * fade};
@@ -118,7 +119,7 @@ static int __attribute__((used, noinline)) eye_trails_emit(void *ghost) {
         trail->x = start_x + (x - start_x) * t - width * 0.5f;
         trail->y = start_y + (y - start_y) * t - height * 0.5f;
         trail->alpha = alpha > 1.0f ? 1.0f : alpha;
-        trail->life = TRAIL_LIFE;
+        trail->born = trail_tick;
         ++trail_count;
     }
     return is_eye;

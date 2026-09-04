@@ -117,13 +117,13 @@ static int language = SETTING_LANGUAGE_SYSTEM;
 static int build_type = 0;       /* 0=release, 1=debug */
 static int low_performance = 0;  /* 0=off, 1=on */
 static int motion_blur_samples = 4;
-static int reduce_ghost_trails = 0;
+static int reduce_ghost_trails = 1;
 static int ghost_chain_trails = 0;
 static int ghost_eye_trails = 0;
 static int maze_wobble = 0;
 static int danger_zoom = 0;
-static int motion_blur = 1;
-static int ghost_afterimages = 1;
+static int motion_blur = 0;
+static int ghost_afterimages = 0;
 static int ghost_eat_outline = 1;
 static int pacman_light = 0;
 static int power_palette = 0;
@@ -213,13 +213,13 @@ static void reset_settings() {
     build_type = 0;
     low_performance = 0;
     motion_blur_samples = 4;
-    reduce_ghost_trails = 0;
+    reduce_ghost_trails = 1;
     ghost_chain_trails = 0;
     ghost_eye_trails = 0;
     maze_wobble = 0;
     danger_zoom = 0;
-    motion_blur = 1;
-    ghost_afterimages = 1;
+    motion_blur = 0;
+    ghost_afterimages = 0;
     ghost_eat_outline = 1;
     pacman_light = 0;
     power_palette = 0;
@@ -409,7 +409,7 @@ static const char *option_hint() {
     const MenuDesc &page = menus[current_menu];
     if (selected_row < page.count) {
         if (option_locked(page.options[selected_row]))
-            return "Turn LOW PERFORMANCE MODE off in Graphics to unlock these options.";
+            return "Turn ULTRA LOW SETTINGS off in Graphics to unlock these options.";
         switch (page.options[selected_row]) {
             case OPT_OPEN_GAMEPLAY: return "Game speed, gameplay rules and content access.";
             case OPT_OPEN_GRAPHICS: return "Frame rate, lighting, colors, outlines and camera effects.";
@@ -461,7 +461,7 @@ static void render_frame() {
         {"GAME LANGUAGE",         languages[settings_sanitize_language(language) + 1]},
         {"MSAA ANTI-ALIASING",    msaa_to_string(msaa_mode)},
         {"BUILD TYPE",            build_type ? "DEBUG" : "RELEASE"},
-        {"LOW PERFORMANCE MODE",  low_performance ? "ON" : "OFF"},
+        {"ULTRA LOW SETTINGS",    low_performance ? "ON" : "OFF"},
         {"MOTION BLUR",            motion_blur ? "ON" : "OFF"},
         {"MOTION BLUR SAMPLES",    motion_blur_samples == 8 ? "8 (ORIGINAL)" :
                                   motion_blur_samples == 2 ? "2 (FASTEST)" : "4 (FASTER)"},

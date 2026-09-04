@@ -996,11 +996,15 @@ static void glColorMask_vita3k(GLboolean r, GLboolean g, GLboolean b, GLboolean 
 #define AT_HWCAP2 26
 static unsigned long getauxval_soloader(unsigned long type) {
     if (type == AT_HWCAP) {
-        /* Report VFPv3 only — do NOT report NEON.
-         * FMOD's NEON-optimized mixer uses instructions that Vita3K's
-         * ARM interpreter doesn't implement, causing a coprocessor
-         * exception crash.  Without NEON, FMOD falls back to scalar. */
+#ifdef VITA3K_BUILD
+        /* Keep the emulator's VFP mixer fallback: its interpreter cannot
+         * execute all instructions used by FMOD's NEON routines. */
         return COMPAT_HWCAP_VFPv3;
+#else
+        /* Vita's Cortex-A9 supports the native FMOD NEON mixer/resampler.
+         * The emulator workaround must not disable those on hardware. */
+        return COMPAT_HWCAP_VFPv3 | COMPAT_HWCAP_NEON;
+#endif
     }
     return 0;
 }

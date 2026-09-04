@@ -24,6 +24,7 @@
 #include "game_ghost_scan.h"
 #include "game_batch.h"
 #include "game_math.h"
+#include "game_int_vector.h"
 #include "game_shader.h"
 #include "game_sprite_draw.h"
 #include "game_viewport.h"
@@ -203,6 +204,7 @@ void game_perf_install_hooks(void) {
     game_texture_install_hooks();
     game_fade_install_hooks();
     game_navigation_install_hooks();
+    game_int_vector_install_hooks();
     game_math_install_hooks();
     game_danger_zoom_install_hooks();
     game_wobble_install_late_hooks();
