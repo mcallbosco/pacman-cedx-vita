@@ -26,6 +26,13 @@ enum {
 };
 
 enum {
+    SETTING_RESOLUTION_NATIVE = 0,
+    SETTING_RESOLUTION_720X408,
+    SETTING_RESOLUTION_PSP,
+    SETTING_RESOLUTION_COUNT
+};
+
+enum {
     SETTING_LANGUAGE_SYSTEM = -1,
     SETTING_LANGUAGE_JAPANESE = 0,
     SETTING_LANGUAGE_ENGLISH,
@@ -44,6 +51,7 @@ extern int  setting_sampleSetting;
 extern bool setting_sampleSetting2;
 extern int  setting_msaaMode;
 extern int  setting_frameRate;       /* Render at 30 or 60 FPS. */
+extern int  setting_resolution;      /* Display preset, applied at game launch. */
 extern int  setting_buildType;       /* 0=release, 1=debug/dev */
 extern bool setting_lowPerformance;  /* Native low-performance mode and graphics override. */
 extern bool setting_unlockAllContent; /* true = bypass content access checks */
@@ -79,6 +87,35 @@ static inline int settings_sanitize_motion_blur_samples(int samples) {
 
 static inline int settings_sanitize_frame_rate(int rate) {
     return rate == 30 ? 30 : 60;
+}
+
+static inline int settings_sanitize_resolution(int resolution) {
+    return resolution >= SETTING_RESOLUTION_NATIVE && resolution < SETTING_RESOLUTION_COUNT
+        ? resolution : SETTING_RESOLUTION_NATIVE;
+}
+
+static inline int settings_resolution_width(int resolution) {
+    switch (settings_sanitize_resolution(resolution)) {
+        case SETTING_RESOLUTION_720X408: return 720;
+        case SETTING_RESOLUTION_PSP: return 480;
+        default: return 960;
+    }
+}
+
+static inline int settings_resolution_height(int resolution) {
+    switch (settings_sanitize_resolution(resolution)) {
+        case SETTING_RESOLUTION_720X408: return 408;
+        case SETTING_RESOLUTION_PSP: return 272;
+        default: return 544;
+    }
+}
+
+static inline const char *settings_resolution_to_string(int resolution) {
+    switch (settings_sanitize_resolution(resolution)) {
+        case SETTING_RESOLUTION_720X408: return "720x408";
+        case SETTING_RESOLUTION_PSP: return "PSP (480x272)";
+        default: return "960x544 (NATIVE)";
+    }
 }
 
 const char *settings_msaa_to_string(int mode);

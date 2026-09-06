@@ -67,7 +67,7 @@ static void apply_viewport(void) {
     GLsizei w = viewport[2], h = viewport[3];
     if (bound_target == scene_target && w > 0 && h > 0 && w <= 4096 && h <= 4096 &&
         x >= -16384 && x <= 16384 && y >= -16384 && y <= 16384) {
-        /* vitaGL stores integer half-extents, so use even enlarged sizes. */
+        /* Keep enlarged sizes even for consistent zoom rounding. */
         GLsizei zw = (GLsizei)(w * (1.0f + amount) * 0.5f + 0.5f) * 2;
         GLsizei zh = (GLsizei)(h * (1.0f + amount) * 0.5f + 0.5f) * 2;
         x -= (GLint)((zw - w) * focus_x + 0.5f);

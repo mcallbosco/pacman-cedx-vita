@@ -565,7 +565,9 @@ int main() {
     gl_init();
     egl_mark_gl_initialized(); /* Prevent double-init if native code calls eglInitialize */
     PROF_PHASE_END("gl_init");
-    l_info("GL initialized (960x544)");
+    const int render_width = settings_resolution_width(setting_resolution);
+    const int render_height = settings_resolution_height(setting_resolution);
+    l_info("GL initialized (%dx%d)", render_width, render_height);
 
     if (init) {
 #ifdef ENABLE_IO_PROFILING
@@ -575,14 +577,14 @@ int main() {
         uint64_t io_bytes0 = g_prof_read_bytes;
 #endif
         PROF_PHASE_START();
-        init(&jni, NULL, 960, 544);
-        PROF_PHASE_END("init(960,544)");
+        init(&jni, NULL, render_width, render_height);
+        PROF_PHASE_END("init(screen size)");
 #ifdef ENABLE_IO_PROFILING
         l_info("[PROF]   during init: opens=%llu bytes=%llu KB",
                (unsigned long long)(g_prof_open_count - io_opens0),
                (unsigned long long)((g_prof_read_bytes - io_bytes0) / 1024));
 #endif
-        l_info("init(960, 544) done");
+        l_info("init(%d, %d) done", render_width, render_height);
     }
 
     if (nativeSetDPI) {

@@ -8,6 +8,7 @@
 #include "reimpl/egl.h"
 
 #include "utils/glutil.h"
+#include "utils/settings.h"
 #include "utils/logger.h"
 
 #include <string.h>
@@ -72,10 +73,10 @@ EGLBoolean eglQuerySurface(EGLDisplay dpy, EGLSurface eglSurface,
             *value = 0;
             break;
         case EGL_WIDTH:
-            *value = 960;
+            *value = settings_resolution_width(setting_resolution);
             break;
         case EGL_HEIGHT:
-            *value = 544;
+            *value = settings_resolution_height(setting_resolution);
             break;
         case EGL_TEXTURE_FORMAT:
             *value = EGL_TEXTURE_RGBA;
@@ -102,8 +103,8 @@ EGLBoolean eglQuerySurface(EGLDisplay dpy, EGLSurface eglSurface,
             *value = 220 * EGL_DISPLAY_SCALING; // VITA DPI is 220
             break;
         case EGL_PIXEL_ASPECT_RATIO:
-            // Please don't ask why * EGL_DISPLAY_SCALING, the document says it
-            *value = 960 / 544 * EGL_DISPLAY_SCALING;
+            // Every supported preset retains the display's square pixels.
+            *value = EGL_DISPLAY_SCALING;
             break;
         case EGL_RENDER_BUFFER:
             *value = EGL_BACK_BUFFER;

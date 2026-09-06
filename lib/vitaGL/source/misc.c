@@ -315,9 +315,9 @@ void glViewport(GLint x, GLint y, GLsizei width, GLsizei height) {
 	}
 #endif
 
-	x_scale = width >> 1;
+	x_scale = width * 0.5f;
 	x_port = x + x_scale;
-	y_scale = -(height >> 1);
+	y_scale = height * -0.5f;
 	y_port = (is_rendering_display ? DISPLAY_HEIGHT : in_use_framebuffer->height) - y + y_scale;
 #ifndef HAVE_UNFLIPPED_FBOS
 	if (!is_rendering_display) {

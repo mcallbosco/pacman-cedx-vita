@@ -55,6 +55,7 @@ enum OptionIndex {
     OPT_ALL_CONTENT,
     OPT_GHOST_EAT_PARTICLES,
     OPT_FRAME_RATE,
+    OPT_RESOLUTION,
     OPT_OPEN_GAMEPLAY,
     OPT_OPEN_GRAPHICS,
     OPT_OPEN_INTENSIVE,
@@ -80,7 +81,7 @@ static const OptionIndex gameplay_options[] = {
     OPT_GAMEPLAY_SPEED, OPT_PC_RULES, OPT_ALL_CONTENT
 };
 static const OptionIndex graphics_options[] = {
-    OPT_LOW_PERF, OPT_FRAME_RATE, OPT_GHOST_EAT_OUTLINE, OPT_PACMAN_LIGHT,
+    OPT_LOW_PERF, OPT_FRAME_RATE, OPT_RESOLUTION, OPT_GHOST_EAT_OUTLINE, OPT_PACMAN_LIGHT,
     OPT_POWER_PALETTE, OPT_POWER_FLASH, OPT_POWER_PULSE, OPT_DANGER_ZOOM
 };
 static const OptionIndex intensive_options[] = {
@@ -111,6 +112,7 @@ static const MenuDesc menus[MENU_COUNT] = {
 
 static int msaa_mode = MSAA_OFF;
 static int frame_rate = 60;
+static int resolution = SETTING_RESOLUTION_NATIVE;
 static int pc_speed = 1;
 static int pc_rules = 1;
 static int language = SETTING_LANGUAGE_SYSTEM;
@@ -210,6 +212,7 @@ static void reset_settings() {
     pc_rules = 1;
     msaa_mode = MSAA_OFF;
     frame_rate = 60;
+    resolution = SETTING_RESOLUTION_NATIVE;
     build_type = 0;
     low_performance = 0;
     motion_blur_samples = 4;
@@ -271,6 +274,8 @@ static void load_settings() {
             msaa_mode = sanitize_msaa(val);
         else if (strcmp(key, "setting_frameRate") == 0)
             frame_rate = settings_sanitize_frame_rate(val);
+        else if (strcmp(key, "setting_resolution") == 0)
+            resolution = settings_sanitize_resolution(val);
         else if (strcmp(key, "setting_pcRules") == 0)
             pc_rules = (val != 0) ? 1 : 0;
         else if (strcmp(key, "setting_pcSpeed") == 0)
@@ -339,6 +344,7 @@ static void save_settings() {
     fprintf(f, "setting_sampleSetting2 1\n");
     fprintf(f, "setting_msaaMode %d\n", sanitize_msaa(msaa_mode));
     fprintf(f, "setting_frameRate %d\n", settings_sanitize_frame_rate(frame_rate));
+    fprintf(f, "setting_resolution %d\n", settings_sanitize_resolution(resolution));
     fprintf(f, "setting_buildType %d\n", (build_type == 0 || build_type == 1) ? build_type : 0);
     fprintf(f, "setting_lowPerformance %d\n", low_performance ? 1 : 0);
     fprintf(f, "setting_motionBlurSamples %d\n", settings_sanitize_motion_blur_samples(motion_blur_samples));
@@ -412,8 +418,9 @@ static const char *option_hint() {
             return "Turn ULTRA LOW SETTINGS off in Graphics to unlock these options.";
         switch (page.options[selected_row]) {
             case OPT_OPEN_GAMEPLAY: return "Game speed, gameplay rules and content access.";
-            case OPT_OPEN_GRAPHICS: return "Frame rate, lighting, colors, outlines and camera effects.";
+            case OPT_OPEN_GRAPHICS: return "Resolution, frame rate, lighting, colors and camera effects.";
             case OPT_FRAME_RATE: return "30 FPS reduces rendering load while keeping normal game speed.";
+            case OPT_RESOLUTION: return "Lower resolutions look softer and reduce rendering load. Applies next launch.";
             case OPT_OPEN_INTENSIVE: return "Effects and quality options that can reduce frame rate.";
             case OPT_OPEN_SYSTEM: return "Game language and release/debug selection.";
             case OPT_LOW_PERF: return "Disables other graphics options. Saved choices return when switched off.";
@@ -481,6 +488,7 @@ static void render_frame() {
         {"UNLOCK ALL CONTENT",   all_content ? "ON" : "OFF"},
         {"GHOST-EAT PARTICLES",    ghost_eat_particles ? "ON" : "OFF"},
         {"FRAME RATE",            frame_rate == 30 ? "30 FPS" : "60 FPS"},
+        {"RESOLUTION",            settings_resolution_to_string(resolution)},
         {"GAMEPLAY",              ">"},
         {"GRAPHICS",              ">"},
         {"INTENSIVE GRAPHICS",    ">"},
@@ -566,6 +574,11 @@ static void cycle_option(int idx, int direction) {
     switch (idx) {
         case OPT_FRAME_RATE:
             frame_rate = frame_rate == 30 ? 60 : 30;
+            dirty = true;
+            break;
+        case OPT_RESOLUTION:
+            resolution = (settings_sanitize_resolution(resolution) +
+                          (direction > 0 ? 1 : SETTING_RESOLUTION_COUNT - 1)) % SETTING_RESOLUTION_COUNT;
             dirty = true;
             break;
         case OPT_GAMEPLAY_SPEED:

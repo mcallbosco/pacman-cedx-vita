@@ -7,6 +7,7 @@
 
 #include "reimpl/controls.h"
 #include "utils/logger.h"
+#include "utils/settings.h"
 
 #include <math.h>
 #include <psp2/ctrl.h>
@@ -16,9 +17,6 @@
 
 #define LEFT_ANALOG_DEADZONE  0.16f
 #define RIGHT_ANALOG_DEADZONE 0.16f
-
-#define TOUCH_SCREEN_WIDTH  960.0f
-#define TOUCH_SCREEN_HEIGHT 544.0f
 
 static SceTouchPanelInfo front_touch_info;
 static int front_touch_info_valid = 0;
@@ -79,20 +77,20 @@ SceTouchData touch_old;
 
 static float touch_scale_x(int raw_x) {
     if (front_touch_info_valid && front_touch_info.maxDispX > front_touch_info.minDispX) {
-        return ((float)(raw_x - front_touch_info.minDispX) * TOUCH_SCREEN_WIDTH) /
+        return ((float)(raw_x - front_touch_info.minDispX) * settings_resolution_width(setting_resolution)) /
                (float)(front_touch_info.maxDispX - front_touch_info.minDispX);
     }
 
-    return (float)raw_x * TOUCH_SCREEN_WIDTH / 1920.0f;
+    return (float)raw_x * settings_resolution_width(setting_resolution) / 1920.0f;
 }
 
 static float touch_scale_y(int raw_y) {
     if (front_touch_info_valid && front_touch_info.maxDispY > front_touch_info.minDispY) {
-        return ((float)(raw_y - front_touch_info.minDispY) * TOUCH_SCREEN_HEIGHT) /
+        return ((float)(raw_y - front_touch_info.minDispY) * settings_resolution_height(setting_resolution)) /
                (float)(front_touch_info.maxDispY - front_touch_info.minDispY);
     }
 
-    return (float)raw_y * TOUCH_SCREEN_HEIGHT / 1088.0f;
+    return (float)raw_y * settings_resolution_height(setting_resolution) / 1088.0f;
 }
 
 void controls_poll_touch() {
