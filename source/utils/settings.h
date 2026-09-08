@@ -52,6 +52,7 @@ extern bool setting_sampleSetting2;
 extern int  setting_msaaMode;
 extern int  setting_frameRate;       /* Render at 30 or 60 FPS. */
 extern int  setting_resolution;      /* Display preset, applied at game launch. */
+extern bool setting_nativeUi;        /* Keep UI native while scaling gameplay. */
 extern int  setting_buildType;       /* 0=release, 1=debug/dev */
 extern bool setting_lowPerformance;  /* Native low-performance mode and graphics override. */
 extern bool setting_unlockAllContent; /* true = bypass content access checks */
@@ -116,6 +117,14 @@ static inline const char *settings_resolution_to_string(int resolution) {
         case SETTING_RESOLUTION_PSP: return "PSP (480x272)";
         default: return "960x544 (NATIVE)";
     }
+}
+
+static inline int settings_display_width(void) {
+    return setting_nativeUi ? 960 : settings_resolution_width(setting_resolution);
+}
+
+static inline int settings_display_height(void) {
+    return setting_nativeUi ? 544 : settings_resolution_height(setting_resolution);
 }
 
 const char *settings_msaa_to_string(int mode);

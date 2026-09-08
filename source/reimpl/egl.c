@@ -73,10 +73,10 @@ EGLBoolean eglQuerySurface(EGLDisplay dpy, EGLSurface eglSurface,
             *value = 0;
             break;
         case EGL_WIDTH:
-            *value = settings_resolution_width(setting_resolution);
+            *value = settings_display_width();
             break;
         case EGL_HEIGHT:
-            *value = settings_resolution_height(setting_resolution);
+            *value = settings_display_height();
             break;
         case EGL_TEXTURE_FORMAT:
             *value = EGL_TEXTURE_RGBA;

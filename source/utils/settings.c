@@ -17,6 +17,7 @@ bool setting_sampleSetting2;
 int  setting_msaaMode;
 int  setting_frameRate;
 int  setting_resolution;
+bool setting_nativeUi;
 int  setting_buildType;
 bool setting_lowPerformance;
 bool setting_unlockAllContent;
@@ -67,6 +68,7 @@ void settings_reset() {
     setting_msaaMode       = SETTING_MSAA_OFF;
     setting_frameRate      = 60;
     setting_resolution     = SETTING_RESOLUTION_NATIVE;
+    setting_nativeUi       = true;
     setting_buildType      = 0;
     setting_lowPerformance = false;
     setting_unlockAllContent = false;
@@ -104,6 +106,7 @@ void settings_load() {
             else if (strcmp("setting_msaaMode", buffer) == 0)       setting_msaaMode = settings_sanitize_msaa_mode(value);
             else if (strcmp("setting_frameRate", buffer) == 0)      setting_frameRate = settings_sanitize_frame_rate(value);
             else if (strcmp("setting_resolution", buffer) == 0)     setting_resolution = settings_sanitize_resolution(value);
+            else if (strcmp("setting_nativeUi", buffer) == 0)       setting_nativeUi = (bool)value;
             else if (strcmp("setting_buildType", buffer) == 0)      setting_buildType = (value == 0 || value == 1) ? value : 0;
             else if (strcmp("setting_lowPerformance", buffer) == 0) setting_lowPerformance = (bool)value;
             else if (strcmp("setting_unlockAllContent", buffer) == 0 ||
@@ -140,6 +143,7 @@ void settings_apply_runtime_overrides() {
     /* The configurator retains saved preferences. These values are used only
      * by this game launch, including settings from older configuration files. */
     setting_msaaMode = SETTING_MSAA_OFF;
+    setting_nativeUi = false;
     setting_frameRate = 60;
     setting_motionBlur = false;
     setting_motionBlurSamples = 2;
@@ -172,6 +176,7 @@ void settings_save() {
         fprintf(config, "%s %d\n", "setting_msaaMode", settings_sanitize_msaa_mode(setting_msaaMode));
         fprintf(config, "setting_frameRate %d\n", settings_sanitize_frame_rate(setting_frameRate));
         fprintf(config, "setting_resolution %d\n", settings_sanitize_resolution(setting_resolution));
+        fprintf(config, "setting_nativeUi %d\n", (int)setting_nativeUi);
         fprintf(config, "%s %d\n", "setting_buildType", (setting_buildType == 0 || setting_buildType == 1) ? setting_buildType : 0);
         fprintf(config, "%s %d\n", "setting_lowPerformance", (int)(setting_lowPerformance));
         fprintf(config, "%s %d\n", "setting_unlockAllContent", (int)(setting_unlockAllContent));

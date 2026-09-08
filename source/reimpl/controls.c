@@ -77,20 +77,20 @@ SceTouchData touch_old;
 
 static float touch_scale_x(int raw_x) {
     if (front_touch_info_valid && front_touch_info.maxDispX > front_touch_info.minDispX) {
-        return ((float)(raw_x - front_touch_info.minDispX) * settings_resolution_width(setting_resolution)) /
+        return ((float)(raw_x - front_touch_info.minDispX) * settings_display_width()) /
                (float)(front_touch_info.maxDispX - front_touch_info.minDispX);
     }
 
-    return (float)raw_x * settings_resolution_width(setting_resolution) / 1920.0f;
+    return (float)raw_x * settings_display_width() / 1920.0f;
 }
 
 static float touch_scale_y(int raw_y) {
     if (front_touch_info_valid && front_touch_info.maxDispY > front_touch_info.minDispY) {
-        return ((float)(raw_y - front_touch_info.minDispY) * settings_resolution_height(setting_resolution)) /
+        return ((float)(raw_y - front_touch_info.minDispY) * settings_display_height()) /
                (float)(front_touch_info.maxDispY - front_touch_info.minDispY);
     }
 
-    return (float)raw_y * settings_resolution_height(setting_resolution) / 1088.0f;
+    return (float)raw_y * settings_display_height() / 1088.0f;
 }
 
 void controls_poll_touch() {

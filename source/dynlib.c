@@ -41,6 +41,7 @@
 #include "utils/game_map_effects.h"
 #include "utils/game_wobble.h"
 #include "utils/game_danger_zoom.h"
+#include "utils/game_resolution.h"
 #include "utils/utils.h"
 #include "utils/logger.h"
 
@@ -1668,7 +1669,7 @@ so_default_dynlib default_dynlib[] = {
         { "glSampleCoveragex", (uintptr_t)&ret0 },
         { "glScalef", (uintptr_t)&glScalef },
         { "glScalex", (uintptr_t)&glScalex },
-        { "glScissor", (uintptr_t)&glScissor },
+        { "glScissor", (uintptr_t)&game_resolution_scissor },
         { "glShadeModel", (uintptr_t)&glShadeModel },
         { "glShaderSource", (uintptr_t)&glShaderSource_soloader },
         { "glStencilFunc", (uintptr_t)&glStencilFunc },

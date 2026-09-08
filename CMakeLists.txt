@@ -211,6 +211,7 @@ add_executable(${CMAKE_PROJECT_NAME}
                source/utils/game_int_vector.c
                source/utils/game_map_effects.c
                source/utils/game_danger_zoom.c
+               source/utils/game_resolution.c
                source/utils/game_frame_rate.c
                source/utils/game_frame.c
                source/utils/init.c

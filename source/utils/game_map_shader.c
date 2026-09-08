@@ -152,8 +152,8 @@ int game_map_shader_draw(GLuint program, GLfloat light, const void *vertices,
     int side = endpoint(data);
     if (side < 0)
         return 0;
-    /* Mixed strips retain one draw with the normal shader's endpoint sample
-     * checks. Splitting them adds state changes and repacking during the wipe. */
+    /* Keep mixed strips in one draw; the normal shader already avoids the
+     * unused texture sample at settled alpha endpoints. */
     for (unsigned i = 1; i < count / 4; ++i)
         if (endpoint(data + i * 40) != side)
             return 0;
@@ -163,19 +163,13 @@ int game_map_shader_draw(GLuint program, GLfloat light, const void *vertices,
         !vglCopyUniform(source_sampler[side], single_sampler))
         return 0;
 
-    uint32_t compact[64 * 4 * 8];
-    for (unsigned v = 0; v < count; ++v) {
-        const uint32_t *src = data + v * 10;
-        uint32_t *dst = compact + v * 8;
-        memcpy(dst, src, 8);
-        memcpy(dst + 2, src + (side ? 2 : 4), 8);
-        memcpy(dst + 4, src + 6, 16);
-    }
     glUseProgram(single_program);
     game_map_effects_apply(single_program);
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 32, compact);
-    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 32, compact + 2);
-    glVertexAttribPointer(4, 4, GL_FLOAT, GL_FALSE, 32, compact + 4);
+    /* Use the source layout directly. vitaGL copies these client arrays into
+     * its GPU pool before the native batch storage can be reused. */
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 40, data);
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 40, data + (side ? 2 : 4));
+    glVertexAttribPointer(4, 4, GL_FLOAT, GL_FALSE, 40, data + 6);
     glEnableVertexAttribArray(1);
     glEnableVertexAttribArray(2);
     glEnableVertexAttribArray(4);

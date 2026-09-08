@@ -565,8 +565,8 @@ int main() {
     gl_init();
     egl_mark_gl_initialized(); /* Prevent double-init if native code calls eglInitialize */
     PROF_PHASE_END("gl_init");
-    const int render_width = settings_resolution_width(setting_resolution);
-    const int render_height = settings_resolution_height(setting_resolution);
+    const int render_width = settings_display_width();
+    const int render_height = settings_display_height();
     l_info("GL initialized (%dx%d)", render_width, render_height);
 
     if (init) {

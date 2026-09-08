@@ -2,6 +2,8 @@
 #include "game_patch.h"
 #include "settings.h"
 #include "game_frame_rate.h"
+#include "game_resolution.h"
+#include "game_batch.h"
 
 #include <math.h>
 #include <string.h>
@@ -19,6 +21,9 @@ static const unsigned char *pacman;
 static float amount, focus_x, focus_y;
 static int drawing;
 static GLint viewport[4], scene_target, bound_target;
+static int split_ui;
+static uintptr_t overlay_resume __attribute__((used));
+static void *(*primitive_list_get)(int) __attribute__((used));
 
 static float number(const void *object, unsigned offset) {
     float value;
@@ -75,12 +80,12 @@ static void apply_viewport(void) {
         w = zw;
         h = zh;
     }
-    glViewport(x, y, w, h);
+    game_resolution_viewport(x, y, w, h);
 }
 
 void game_danger_zoom_viewport(GLint x, GLint y, GLsizei width, GLsizei height) {
     if (!drawing || width < 0 || height < 0) {
-        glViewport(x, y, width, height);
+        game_resolution_viewport(x, y, width, height);
         return;
     }
     viewport[0] = x; viewport[1] = y;
@@ -89,9 +94,9 @@ void game_danger_zoom_viewport(GLint x, GLint y, GLsizei width, GLsizei height) 
 }
 
 void game_danger_zoom_bind_framebuffer(GLenum target, GLuint framebuffer) {
-    glBindFramebuffer(target, framebuffer);
+    game_resolution_bind_framebuffer(target, framebuffer);
     if (drawing) {
-        glGetIntegerv(GL_FRAMEBUFFER_BINDING, &bound_target);
+        game_resolution_get_integer(GL_FRAMEBUFFER_BINDING, &bound_target);
         apply_viewport();
     }
 }
@@ -102,7 +107,7 @@ void game_danger_zoom_get_integer(GLenum name, GLint *value) {
     if (drawing && name == GL_VIEWPORT)
         memcpy(value, viewport, sizeof(viewport));
     else
-        glGetIntegerv(name, value);
+        game_resolution_get_integer(name, value);
 }
 
 /* Replay the checked prologue and displaced call. The native epilogue
@@ -120,27 +125,55 @@ static void __attribute__((naked, noinline)) draw_original(void) {
         "bx ip\n");
 }
 
+static void __attribute__((used, noinline)) finish_world(void) {
+    if (*graphics)
+        end_batches(*graphics);
+    if (drawing) {
+        drawing = 0;
+        game_resolution_viewport(viewport[0], viewport[1], viewport[2], viewport[3]);
+    }
+    game_resolution_present();
+}
+
+/* List 4 contains the native HUD, prompts and fades. Preserve its ordering,
+ * projection and draw callbacks, after resolving the lower-resolution world. */
+static void __attribute__((naked, noinline)) overlay_bridge(void) {
+    __asm__(
+        "push {r4, lr}\n"
+        "bl finish_world\n"
+        "movs r0, #4\n"
+        "ldr ip, =primitive_list_get\n"
+        "ldr ip, [ip]\n"
+        "blx ip\n"
+        "pop {r4, lr}\n"
+        "str r0, [sp, #4]\n"
+        "ldr ip, =overlay_resume\n"
+        "ldr ip, [ip]\n"
+        "bx ip\n");
+}
+
 static void draw_zoom(void) {
     int enabled = update_zoom() && *graphics;
-    if (enabled) {
+    if ((split_ui || enabled) && *graphics)
         end_batches(*graphics);
-        glGetIntegerv(GL_VIEWPORT, viewport);
-        glGetIntegerv(GL_FRAMEBUFFER_BINDING, &scene_target);
+    if (split_ui && *graphics)
+        game_resolution_begin();
+    if (enabled) {
+        game_resolution_get_integer(GL_VIEWPORT, viewport);
+        game_resolution_get_integer(GL_FRAMEBUFFER_BINDING, &scene_target);
         bound_target = scene_target;
         drawing = 1;
         apply_viewport();
     }
     draw_original();
-    if (enabled) {
+    if (drawing) {
         /* Submit the final game batch before returning to the UI viewport. */
-        end_batches(*graphics);
-        drawing = 0;
-        glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
+        finish_world();
     }
 }
 
 void game_danger_zoom_install_hooks(void) {
-    if (!setting_dangerZoom)
+    if ((!setting_dangerZoom && !game_resolution_requested()) || !game_batch_flush_available())
         return;
     uintptr_t draw = game_patch_checked_function(
         "_ZN9newPacman8LoopDrawEv", 0xa0, 0x79998f8du);
@@ -156,8 +189,10 @@ void game_danger_zoom_install_hooks(void) {
         "_ZN9newPacman10cSlowSpeed7GetTypeEv", 0x10, 0xa5497a10u);
     slow_rate = (void *)game_patch_checked_function(
         "_ZN9newPacman10cSlowSpeed11GetSlowRateEv", 0x5c, 0xfd4c29c1u);
-    end_batches = (void *)game_patch_checked_function(
-        "_ZN3sys8Graphics10EndBatchesEv", 0xc, 0x87cf7ea5u);
+    /* Base Graphics::EndBatches is empty. Use the checked concrete renderer
+     * Flush captured before its batching patches, so queued geometry cannot
+     * cross framebuffer or viewport transitions. */
+    end_batches = game_batch_flush;
     graphics = (void *)so_symbol(&so_mod, "_ZN3sys11g_pGraphicsE");
     pacman = (void *)so_symbol(&so_mod, "_ZN9newPacman17CStaticEffectInfo6pacmanE");
     if (!draw || !sprite_draw_reset || !is_game || !is_preview || !is_paused || !slow_type || !slow_rate ||
@@ -165,6 +200,20 @@ void game_danger_zoom_install_hooks(void) {
             "_ZN9newPacman10cSlowSpeed4FuncEv", 0x384, 0xc53fd9a1u) ||
         !game_patch_checked_function(
             "_ZN9newPacman13cOnPacmanTask4FuncEv", 0xef0, 0x00ae5623u))
+        return;
+    if (game_resolution_requested()) {
+        primitive_list_get = (void *)game_patch_checked_function(
+            "_ZN3sys16PrimitiveListGetENS_14PrimitiveValueE", 0x2c, 0x184ec3e1u);
+        split_ui = primitive_list_get && game_patch_checked_function(
+            "_ZN9newPacman19cOnSystemLetterTask4DrawEv", 0xf8, 0x1341c1cfu) &&
+            game_patch_checked_function("_ZN9newPacman17cOnGuiCharEmuTask4DrawEv", 0x40, 0x3c1518e6u);
+        if (split_ui) {
+            game_resolution_enable();
+            overlay_resume = draw + 0x78;
+            hook_addr(draw + 0x70, (uintptr_t)overlay_bridge);
+        }
+    }
+    if (!setting_dangerZoom && !split_ui)
         return;
     draw_resume = draw + 0x0a;
     hook_addr(draw, (uintptr_t)draw_zoom);

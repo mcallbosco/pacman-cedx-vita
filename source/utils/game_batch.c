@@ -372,6 +372,15 @@ static void __attribute__((naked)) batch_capacity_bridge(void) {
         ".ltorg\n");
 }
 
+int game_batch_flush_available(void) {
+    return flush_batches != NULL;
+}
+
+void game_batch_flush(void *graphics) {
+    if (flush_batches)
+        flush_batches(graphics);
+}
+
 void game_batch_install_hooks(void) {
     uintptr_t flush = game_patch_checked_function(
         "_ZN3sys22GraphicsAndroidShaders5FlushEv", 0x220, 0x686cadc6u);
