@@ -649,6 +649,21 @@ size_t fread_soloader(void *ptr, size_t size, size_t nmemb, FILE *stream) {
     {
         size_t req = size * nmemb;
         size_t got_bgm = size * ret;
+        if (ret < nmemb && bgm_track_find(stream)) {
+            int at_end, error;
+#ifdef USE_SCELIBC_IO
+            if (!buffered) {
+                at_end = sceLibcBridge_feof(stream);
+                error = sceLibcBridge_ferror(stream);
+            } else
+#endif
+            {
+                at_end = feof(stream);
+                error = ferror(stream);
+            }
+            l_audio("[AUDIO][BGM] short-read fp=%p requested=%zu got=%zu eof=%d error=%d",
+                    stream, req, got_bgm, at_end, error);
+        }
         bgm_track_read(stream, req, got_bgm);
     }
 #endif

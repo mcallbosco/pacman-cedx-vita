@@ -3,6 +3,10 @@
 #include <stdbool.h>
 #include <string.h>
 
+#ifdef ENABLE_AUDIO_LOGS
+#include <psp2/appmgr.h>
+#endif
+
 extern so_module fmod_mod;
 
 enum { POWER_CUE = 52, LOOP_NORMAL = 2, RETRY_FRAMES = 60 };
@@ -51,6 +55,14 @@ void game_audio_log_play(void *sound, void *group, int result, void *channel) {
         return;
     l_audio("[MUSIC] play cue=%u sound=%p group=%p channel=%p result=%d",
             word(sound2, 20), sound, group, channel, result);
+    if (result != 0 && sound && sound_open_state) {
+        int open = -1;
+        unsigned buffered = 0;
+        bool starving = false, busy = false;
+        int open_result = sound_open_state(sound, &open, &buffered, &starving, &busy);
+        l_audio("[MUSIC] failed-play sound=%p result=%d open=%d/%d buffer=%u starving=%d busy=%d",
+                sound, result, open, open_result, buffered, starving, busy);
+    }
     if (result == 0) {
         music_sound = sound;
         music_channel = channel;
@@ -67,6 +79,14 @@ void game_audio_log_release(void *sound) {
 }
 
 static void log_music_state(void *sound2, int update_result) {
+    /* Observe LiveArea returns without changing the game's pause state. */
+    SceAppMgrSystemEvent event = {0};
+    if (sceAppMgrReceiveSystemEvent(&event) == 0 && event.systemEvent) {
+        l_audio("[MUSIC] system-event=%x cue=%u menu-paused=%d game-paused=%d music-paused=%u",
+                event.systemEvent, word(sound2, 20), *pause_menu_shown,
+                is_paused(), ((const unsigned char *)sound2)[17]);
+        diagnostic_frames = 59;
+    }
     if (++diagnostic_frames < 60)
         return;
     diagnostic_frames = 0;
@@ -75,15 +95,18 @@ static void log_music_state(void *sound2, int update_result) {
         return;
     int total = -1, real = -1, open = -1;
     unsigned buffered = 0, mode = 0, position = 0;
-    bool playing = false, paused = false, starving = false, busy = false;
+    bool playing = false, paused = false, group_paused = false, starving = false, busy = false;
     int count_result = channels_playing((void *)(uintptr_t)word(sound2, 4), &total, &real);
     int play_result = channel_playing(music_channel, &playing);
     int pause_result = get_channel_paused(music_channel, &paused);
+    int group_pause_result = get_channel_paused((void *)(uintptr_t)word(sound2, 12), &group_paused);
     int mode_result = get_channel_mode(music_channel, &mode);
     int position_result = get_channel_position(music_channel, &position, 1); /* milliseconds */
     int open_result = sound_open_state(music_sound, &open, &buffered, &starving, &busy);
-    l_audio("[MUSIC] state cue=%u channel=%p playing=%d/%d paused=%d/%d mode=%x/%d ms=%u/%d open=%d/%d buffer=%u starving=%d busy=%d voices=%d/%d/%d update=%d power=%p",
+    l_audio("[MUSIC] state cue=%u channel=%p playing=%d/%d paused=%d/%d group-paused=%d/%d native-paused=%u menu-paused=%d game-paused=%d mode=%x/%d ms=%u/%d open=%d/%d buffer=%u starving=%d busy=%d voices=%d/%d/%d update=%d power=%p",
             word(sound2, 20), music_channel, playing, play_result, paused, pause_result,
+            group_paused, group_pause_result, ((const unsigned char *)sound2)[17],
+            *pause_menu_shown, is_paused(),
             mode, mode_result, position, position_result, open, open_result, buffered,
             starving, busy, total, real, count_result, update_result, loop_channel);
 }

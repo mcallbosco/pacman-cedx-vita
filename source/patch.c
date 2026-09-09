@@ -31,6 +31,7 @@ extern so_module fmod_mod;
 #include "utils/game_speed.h"
 #include "utils/game_rules.h"
 #include "utils/game_audio.h"
+#include "utils/game_music_io.h"
 #include "utils/game_loading.h"
 #include "utils/game_maze_preload.h"
 #include "utils/game_png.h"
@@ -102,8 +103,8 @@ typedef int FMOD_RESULT;
 #define FMOD_MODE_CREATESTREAM 0x00000080u
 
 static so_hook g_hook_fmod_sys_create_sound_cpp;
-#ifdef ENABLE_AUDIO_LOGS
 static so_hook g_hook_fmod_sys_init;
+#ifdef ENABLE_AUDIO_LOGS
 static so_hook g_hook_fmod_sys_set_output;
 static so_hook g_hook_fmod_sys_set_dsp_buffer;
 static so_hook g_hook_fmod_sys_play_sound_cpp;
@@ -318,16 +319,22 @@ static FMOD_RESULT retry_create_sound_with_path_fixups(void *system,
     return ret;
 }
 
-#ifdef ENABLE_AUDIO_LOGS
 static FMOD_RESULT fmod_system_init_cpp_hook(void *system, int max_channels, uint32_t flags, void *extra_driver_data) {
+    int io_result = game_music_io_install(system);
+    if (io_result != 0)
+        l_warn("FMOD file recovery unavailable: %d", io_result);
+    l_audio("[MUSIC-IO] file callbacks installed result=%d", io_result);
     FMOD_RESULT ret = SO_CONTINUE(FMOD_RESULT, g_hook_fmod_sys_init,
                                   system, max_channels, flags, extra_driver_data);
+#ifdef ENABLE_AUDIO_LOGS
     g_fmod_sys_init_calls++;
     l_audio("[AUDIO][FMODAPI] System::init#%u this=%p maxch=%d flags=0x%08X extra=%p ret=%d",
             g_fmod_sys_init_calls, system, max_channels, flags, extra_driver_data, ret);
+#endif
     return ret;
 }
 
+#ifdef ENABLE_AUDIO_LOGS
 static FMOD_RESULT fmod_system_set_output_cpp_hook(void *system, int output_type) {
     FMOD_RESULT ret = SO_CONTINUE(FMOD_RESULT, g_hook_fmod_sys_set_output, system, output_type);
     g_fmod_sys_set_output_calls++;
@@ -470,10 +477,12 @@ static void install_fmod_api_hooks(void) {
         l_warn("FMOD createSound hook not installed; BGM path compatibility fix is disabled.");
     }
 
-#ifdef ENABLE_AUDIO_LOGS
     uintptr_t addr_sys_init = install_fmod_hook("_ZN4FMOD6System4initEijPv",
                                                 (void *)&fmod_system_init_cpp_hook,
                                                 &g_hook_fmod_sys_init);
+    if (!addr_sys_init)
+        l_warn("FMOD init hook not installed; music file recovery is disabled.");
+#ifdef ENABLE_AUDIO_LOGS
     uintptr_t addr_set_output = install_fmod_hook("_ZN4FMOD6System9setOutputE15FMOD_OUTPUTTYPE",
                                                   (void *)&fmod_system_set_output_cpp_hook,
                                                   &g_hook_fmod_sys_set_output);
