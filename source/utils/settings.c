@@ -14,6 +14,7 @@
 
 int  setting_sampleSetting;
 bool setting_sampleSetting2;
+int  setting_graphicsPreset;
 int  setting_msaaMode;
 int  setting_frameRate;
 int  setting_resolution;
@@ -41,13 +42,14 @@ bool setting_ghostLights;
 bool setting_pcSpeed;
 bool setting_pcRules;
 int setting_language;
+static bool legacy_dummy;
 
 const char *settings_msaa_to_string(int mode) {
     switch (mode) {
         case SETTING_MSAA_OFF: return "OFF";
         case SETTING_MSAA_2X:  return "2X";
         case SETTING_MSAA_4X:  return "4X";
-        default: return "2X";
+        default: return "OFF";
     }
 }
 
@@ -59,36 +61,76 @@ int settings_sanitize_msaa_mode(int mode) {
     return mode;
 }
 
+static int sanitize_preset(int preset) {
+    return preset >= 0 && preset < SETTING_PRESET_COUNT ? preset : SETTING_PRESET_CUSTOM;
+}
+
+const char *settings_preset_name(int preset) {
+    static const char *const names[SETTING_PRESET_COUNT] = {
+        "Ultra low",
+        "Default",
+        "Ultra (PSP Res Gameplay, Native UI)",
+        "Ultra (PSP Res Gameplay and UI)",
+        "Ultra (Native Res, 30 FPS)",
+        "Custom"
+    };
+    return names[sanitize_preset(preset)];
+}
+
+const char *settings_preset_description(int preset) {
+    static const char *const descriptions[SETTING_PRESET_COUNT] = {
+        "Locked 60FPS at native resolution",
+        "Near locked 60FPS at native res, missing some effects ported from PC",
+        "Nearly All Effects, Some dips but runs at 60FPS",
+        "Nearly locked 60FPS, some UI text will look ugly",
+        "Locked 30FPS",
+        "Customize individual graphics settings, starting with the current values."
+    };
+    return descriptions[sanitize_preset(preset)];
+}
+
+void settings_apply_graphics_preset(int preset) {
+    setting_graphicsPreset = sanitize_preset(preset);
+    setting_lowPerformance = setting_graphicsPreset == SETTING_PRESET_ULTRA_LOW;
+    setting_ghostLights = false; /* Parked for every preset, including Custom. */
+    if (setting_graphicsPreset == SETTING_PRESET_CUSTOM)
+        return;
+
+    bool ultra = setting_graphicsPreset >= SETTING_PRESET_ULTRA_PSP_NATIVE_UI &&
+                 setting_graphicsPreset <= SETTING_PRESET_ULTRA_NATIVE_30;
+    setting_msaaMode = ultra ? SETTING_MSAA_2X : SETTING_MSAA_OFF;
+    setting_frameRate = setting_graphicsPreset == SETTING_PRESET_ULTRA_NATIVE_30 ? 30 : 60;
+    setting_resolution = ultra && setting_graphicsPreset != SETTING_PRESET_ULTRA_NATIVE_30
+        ? SETTING_RESOLUTION_PSP : SETTING_RESOLUTION_NATIVE;
+    setting_nativeUi = setting_graphicsPreset != SETTING_PRESET_ULTRA_PSP;
+    setting_motionBlurSamples = ultra ? 8 : setting_lowPerformance ? 2 : 4;
+    setting_reduceGhostTrails = !ultra;
+    setting_ghostChainTrails = ultra;
+    setting_ghostEyeTrails = ultra;
+    setting_mazeWobble = ultra;
+    setting_dangerZoom = ultra;
+    setting_motionBlur = ultra;
+    setting_ghostAfterimages = ultra;
+    setting_ghostEatOutline = !setting_lowPerformance;
+    setting_pacmanLight = ultra;
+    setting_powerPalette = ultra;
+    setting_powerFlash = ultra;
+    setting_powerPulse = ultra;
+    setting_mazeGlow = false;
+    setting_impactRipples = ultra;
+    setting_ghostEatParticles = ultra;
+}
+
 void settings_reset() {
     setting_language = SETTING_LANGUAGE_SYSTEM;
     setting_pcSpeed = true;
     setting_pcRules = true;
-    setting_sampleSetting  = 1;
+    setting_sampleSetting = 1;
     setting_sampleSetting2 = true;
-    setting_msaaMode       = SETTING_MSAA_OFF;
-    setting_frameRate      = 60;
-    setting_resolution     = SETTING_RESOLUTION_NATIVE;
-    setting_nativeUi       = true;
-    setting_buildType      = 0;
-    setting_lowPerformance = false;
+    setting_buildType = 0;
     setting_unlockAllContent = false;
-    setting_motionBlurSamples = 4;
-    setting_reduceGhostTrails = true;
-    setting_ghostChainTrails = false;
-    setting_ghostEyeTrails = false;
-    setting_mazeWobble = false;
-    setting_dangerZoom = false;
-    setting_motionBlur = false;
-    setting_ghostAfterimages = false;
-    setting_ghostEatOutline = true;
-    setting_pacmanLight = false;
-    setting_powerPalette = false;
-    setting_powerFlash = false;
-    setting_powerPulse = false;
-    setting_mazeGlow = false;
-    setting_impactRipples = false;
-    setting_ghostEatParticles = false;
-    setting_ghostLights = false;
+    legacy_dummy = false;
+    settings_apply_graphics_preset(SETTING_PRESET_DEFAULT);
 }
 
 void settings_load() {
@@ -96,6 +138,7 @@ void settings_load() {
 
     char buffer[64];
     int value;
+    bool has_preset = false;
 
     FILE *config = fopen(CONFIG_FILE_PATH, "r");
 
@@ -103,6 +146,10 @@ void settings_load() {
         while (fscanf(config, "%63s %d\n", buffer, &value) == 2) {
             if 		(strcmp("setting_sampleSetting", buffer) == 0) 	setting_sampleSetting  = (int)value;
             else if (strcmp("setting_sampleSetting2", buffer) == 0) setting_sampleSetting2 = (bool)value;
+            else if (strcmp("setting_graphicsPreset", buffer) == 0) {
+                setting_graphicsPreset = sanitize_preset(value);
+                has_preset = true;
+            }
             else if (strcmp("setting_msaaMode", buffer) == 0)       setting_msaaMode = settings_sanitize_msaa_mode(value);
             else if (strcmp("setting_frameRate", buffer) == 0)      setting_frameRate = settings_sanitize_frame_rate(value);
             else if (strcmp("setting_resolution", buffer) == 0)     setting_resolution = settings_sanitize_resolution(value);
@@ -130,41 +177,24 @@ void settings_load() {
             else if (strcmp("setting_pcRules", buffer) == 0) setting_pcRules = (bool)value;
             else if (strcmp("setting_pcSpeed", buffer) == 0) setting_pcSpeed = (bool)value;
             else if (strcmp("setting_language", buffer) == 0) setting_language = settings_sanitize_language(value);
+            else if (strcmp("setting_dummy", buffer) == 0) legacy_dummy = (bool)value;
         }
         fclose(config);
+        /* Preserve existing individual choices when upgrading an older file. */
+        if (!has_preset)
+            setting_graphicsPreset = setting_lowPerformance
+                ? SETTING_PRESET_ULTRA_LOW : SETTING_PRESET_CUSTOM;
     }
 
-    setting_msaaMode = settings_sanitize_msaa_mode(setting_msaaMode);
+    settings_apply_graphics_preset(setting_graphicsPreset);
 }
 
 void settings_apply_runtime_overrides() {
-    if (!setting_lowPerformance)
-        return;
-    /* The configurator retains saved preferences. These values are used only
-     * by this game launch, including settings from older configuration files. */
-    setting_msaaMode = SETTING_MSAA_OFF;
-    setting_nativeUi = false;
-    setting_frameRate = 60;
-    setting_motionBlur = false;
-    setting_motionBlurSamples = 2;
-    setting_reduceGhostTrails = true;
-    setting_ghostAfterimages = false;
-    setting_ghostChainTrails = false;
-    setting_ghostEyeTrails = false;
-    setting_mazeWobble = false;
-    setting_dangerZoom = false;
-    setting_ghostEatOutline = false;
-    setting_pacmanLight = false;
-    setting_powerPalette = false;
-    setting_powerFlash = false;
-    setting_powerPulse = false;
-    setting_mazeGlow = false;
-    setting_impactRipples = false;
-    setting_ghostEatParticles = false;
-    setting_ghostLights = false;
+    settings_apply_graphics_preset(setting_graphicsPreset);
 }
 
-void settings_save() {
+bool settings_save() {
+    settings_apply_graphics_preset(setting_graphicsPreset);
     FILE *config = fopen(CONFIG_FILE_PATH, "w+");
 
     if (config) {
@@ -173,6 +203,7 @@ void settings_save() {
         fprintf(config, "setting_pcSpeed %d\n", (int)setting_pcSpeed);
         fprintf(config, "%s %d\n", "setting_sampleSetting", (int)(setting_sampleSetting));
         fprintf(config, "%s %d\n", "setting_sampleSetting2", (int)(setting_sampleSetting2));
+        fprintf(config, "setting_graphicsPreset %d\n", setting_graphicsPreset);
         fprintf(config, "%s %d\n", "setting_msaaMode", settings_sanitize_msaa_mode(setting_msaaMode));
         fprintf(config, "setting_frameRate %d\n", settings_sanitize_frame_rate(setting_frameRate));
         fprintf(config, "setting_resolution %d\n", settings_sanitize_resolution(setting_resolution));
@@ -196,6 +227,9 @@ void settings_save() {
         fprintf(config, "setting_mazeGlow %d\n", (int)setting_mazeGlow);
         fprintf(config, "setting_impactRipples %d\n", (int)setting_impactRipples);
         fprintf(config, "setting_ghostEatParticles %d\n", (int)setting_ghostEatParticles);
-        fclose(config);
+        fprintf(config, "setting_dummy %d\n", (int)legacy_dummy);
+        bool success = !ferror(config);
+        return fclose(config) == 0 && success;
     }
+    return false;
 }

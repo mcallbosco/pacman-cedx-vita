@@ -337,7 +337,7 @@ add_dependencies(vitaGL_clean_lib vitaGL_clean_build)
 # Configurator - standalone settings app launched from LiveArea (imgui)
 # The configurator does NOT load Android .so files, so it uses the standard
 # hardfp ABI to match the SDK's pre-built imgui and system libraries.
-add_executable(configurator source/configurator.cpp)
+add_executable(configurator source/configurator.cpp source/utils/settings.c)
 target_compile_options(configurator PRIVATE -mfloat-abi=hard)
 target_link_libraries(configurator
                       vita2d

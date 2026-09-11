@@ -20,15 +20,8 @@
 #include <cstring>
 #include "utils/settings.h"
 
-#define CONFIG_FILE "ux0:data/pacmancedx/config.txt"
 #define CONFIG_DIR  "ux0:data/pacmancedx"
 #define LOG_FILE    "ux0:data/pacmancedx/configurator.log"
-
-enum {
-    MSAA_OFF = 0,
-    MSAA_2X  = 1,
-    MSAA_4X  = 2
-};
 
 enum OptionIndex {
     OPT_GAMEPLAY_SPEED = 0,
@@ -36,7 +29,7 @@ enum OptionIndex {
     OPT_LANGUAGE,
     OPT_MSAA,
     OPT_BUILD_TYPE,
-    OPT_LOW_PERF,
+    OPT_OPEN_PRESETS,
     OPT_MOTION_BLUR_ENABLED,
     OPT_MOTION_BLUR,
     OPT_GHOST_AFTERIMAGES,
@@ -61,8 +54,17 @@ enum OptionIndex {
     OPT_OPEN_GRAPHICS,
     OPT_OPEN_INTENSIVE,
     OPT_OPEN_SYSTEM,
+    OPT_PRESET_ULTRA_LOW,
+    OPT_PRESET_DEFAULT,
+    OPT_PRESET_ULTRA_PSP_NATIVE_UI,
+    OPT_PRESET_ULTRA_PSP,
+    OPT_PRESET_ULTRA_NATIVE_30,
+    OPT_PRESET_CUSTOM,
     OPTION_COUNT
 };
+
+static_assert(OPT_PRESET_CUSTOM - OPT_PRESET_ULTRA_LOW + 1 == SETTING_PRESET_COUNT,
+              "Each graphics preset needs a menu entry");
 
 #define VISIBLE_OPTIONS 4
 
@@ -72,72 +74,54 @@ enum MenuPage {
     MENU_GRAPHICS,
     MENU_INTENSIVE,
     MENU_SYSTEM,
+    MENU_PRESETS,
     MENU_COUNT
 };
 
 static const OptionIndex main_options[] = {
-    OPT_OPEN_GAMEPLAY, OPT_OPEN_GRAPHICS, OPT_OPEN_INTENSIVE, OPT_OPEN_SYSTEM
+    OPT_OPEN_GAMEPLAY, OPT_OPEN_GRAPHICS, OPT_OPEN_SYSTEM
 };
 static const OptionIndex gameplay_options[] = {
     OPT_GAMEPLAY_SPEED, OPT_PC_RULES, OPT_ALL_CONTENT
 };
 static const OptionIndex graphics_options[] = {
-    OPT_LOW_PERF, OPT_FRAME_RATE, OPT_RESOLUTION, OPT_NATIVE_UI, OPT_GHOST_EAT_OUTLINE, OPT_PACMAN_LIGHT,
+    OPT_OPEN_PRESETS, OPT_OPEN_INTENSIVE, OPT_GHOST_EAT_OUTLINE, OPT_PACMAN_LIGHT,
     OPT_POWER_PALETTE, OPT_POWER_FLASH, OPT_POWER_PULSE, OPT_DANGER_ZOOM
 };
 static const OptionIndex intensive_options[] = {
+    OPT_FRAME_RATE, OPT_RESOLUTION, OPT_NATIVE_UI,
     OPT_GHOST_EAT_PARTICLES, OPT_MAZE_GLOW, OPT_MSAA, OPT_MAZE_WOBBLE, OPT_IMPACT_RIPPLES,
     OPT_GHOST_AFTERIMAGES, OPT_GHOST_TRAILS, OPT_GHOST_CHAIN_TRAIL,
     OPT_GHOST_EYE_TRAILS, OPT_MOTION_BLUR_ENABLED, OPT_MOTION_BLUR
 };
 static const OptionIndex system_options[] = {OPT_LANGUAGE, OPT_BUILD_TYPE};
+static const OptionIndex preset_options[] = {
+    OPT_PRESET_ULTRA_LOW, OPT_PRESET_DEFAULT, OPT_PRESET_ULTRA_PSP_NATIVE_UI,
+    OPT_PRESET_ULTRA_PSP, OPT_PRESET_ULTRA_NATIVE_30, OPT_PRESET_CUSTOM
+};
 
 struct MenuDesc {
     const char *title;
     const OptionIndex *options;
     int count;
+    MenuPage parent;
 };
 
 template <size_t N>
-static constexpr MenuDesc menu(const char *title, const OptionIndex (&options)[N]) {
-    return {title, options, (int)N};
+static constexpr MenuDesc menu(const char *title, const OptionIndex (&options)[N],
+                               MenuPage parent = MENU_MAIN) {
+    return {title, options, (int)N, parent};
 }
 
 static const MenuDesc menus[MENU_COUNT] = {
     menu("SETTINGS", main_options),
     menu("SETTINGS / GAMEPLAY", gameplay_options),
     menu("SETTINGS / GRAPHICS", graphics_options),
-    menu("SETTINGS / INTENSIVE GRAPHICS", intensive_options),
-    menu("SETTINGS / SYSTEM", system_options)
+    menu("SETTINGS / GRAPHICS / INTENSIVE GRAPHICS", intensive_options, MENU_GRAPHICS),
+    menu("SETTINGS / SYSTEM", system_options),
+    menu("SETTINGS / GRAPHICS / PRESET", preset_options, MENU_GRAPHICS)
 };
 
-static int msaa_mode = MSAA_OFF;
-static int frame_rate = 60;
-static int resolution = SETTING_RESOLUTION_NATIVE;
-static int native_ui = 1;
-static int pc_speed = 1;
-static int pc_rules = 1;
-static int language = SETTING_LANGUAGE_SYSTEM;
-static int build_type = 0;       /* 0=release, 1=debug */
-static int low_performance = 0;  /* 0=off, 1=on */
-static int motion_blur_samples = 4;
-static int reduce_ghost_trails = 1;
-static int ghost_chain_trails = 0;
-static int ghost_eye_trails = 0;
-static int maze_wobble = 0;
-static int danger_zoom = 0;
-static int motion_blur = 0;
-static int ghost_afterimages = 0;
-static int ghost_eat_outline = 1;
-static int pacman_light = 0;
-static int power_palette = 0;
-static int power_flash = 0;
-static int power_pulse = 0;
-static int maze_glow = 0;
-static int impact_ripples = 0;
-static int ghost_eat_particles = 0;
-static int all_content = 0;     /* 1=unlocked, 0=normal */
-static int dummy_setting = 0;    /* Preserve the legacy configuration key. */
 static bool dirty = false;
 static bool reset_holding = false;
 static bool reset_fired = false;
@@ -155,6 +139,8 @@ struct MenuPosition {
 static MenuPosition menu_positions[MENU_COUNT];
 static vita2d_pgf *g_font = nullptr;
 
+static void ensure_scroll_visible();
+
 static void open_menu(MenuPage page) {
     menu_positions[current_menu] = {selected_row, selected_button, scroll_offset};
     current_menu = page;
@@ -162,10 +148,15 @@ static void open_menu(MenuPage page) {
     selected_row = position.row;
     selected_button = position.button;
     scroll_offset = position.scroll;
+    if (page == MENU_PRESETS) {
+        selected_row = setting_graphicsPreset;
+        ensure_scroll_visible();
+    }
 }
 
 static bool option_locked(int option) {
-    if (!low_performance || option == OPT_LOW_PERF)
+    if (setting_graphicsPreset == SETTING_PRESET_CUSTOM ||
+        option == OPT_OPEN_PRESETS || option == OPT_OPEN_INTENSIVE)
         return false;
     const MenuPage graphics_pages[] = {MENU_GRAPHICS, MENU_INTENSIVE};
     for (MenuPage page : graphics_pages)
@@ -193,51 +184,6 @@ static void log_line(const char *fmt, ...) {
     sceIoClose(fd);
 }
 
-static const char *msaa_to_string(int mode) {
-    switch (mode) {
-        case MSAA_OFF: return "OFF";
-        case MSAA_2X:  return "2X";
-        case MSAA_4X:  return "4X";
-        default:       return "OFF";
-    }
-}
-
-static int sanitize_msaa(int mode) {
-    if (mode < MSAA_OFF || mode > MSAA_4X)
-        return MSAA_OFF;
-    return mode;
-}
-
-static void reset_settings() {
-    language = SETTING_LANGUAGE_SYSTEM;
-    pc_speed = 1;
-    pc_rules = 1;
-    msaa_mode = MSAA_OFF;
-    frame_rate = 60;
-    resolution = SETTING_RESOLUTION_NATIVE;
-    native_ui = 1;
-    build_type = 0;
-    low_performance = 0;
-    motion_blur_samples = 4;
-    reduce_ghost_trails = 1;
-    ghost_chain_trails = 0;
-    ghost_eye_trails = 0;
-    maze_wobble = 0;
-    danger_zoom = 0;
-    motion_blur = 0;
-    ghost_afterimages = 0;
-    ghost_eat_outline = 1;
-    pacman_light = 0;
-    power_palette = 0;
-    power_flash = 0;
-    power_pulse = 0;
-    maze_glow = 0;
-    impact_ripples = 0;
-    ghost_eat_particles = 0;
-    all_content = 0;
-    dummy_setting = 0;
-}
-
 /* Require one continuous hold, and release before another reset. */
 static bool update_reset_hold(uint32_t buttons, uint64_t now) {
     const uint32_t bumpers = SCE_CTRL_LTRIGGER | SCE_CTRL_RTRIGGER;
@@ -254,7 +200,7 @@ static bool update_reset_hold(uint32_t buttons, uint64_t now) {
     uint64_t elapsed = now - reset_started;
     reset_progress = elapsed >= 1000000 ? 1.0f : (float)elapsed / 1000000.0f;
     if (!reset_fired && elapsed >= 1000000) {
-        reset_settings();
+        settings_reset();
         dirty = true;
         reset_fired = true;
         reset_notice_until = now + 3000000;
@@ -263,117 +209,14 @@ static bool update_reset_hold(uint32_t buttons, uint64_t now) {
 }
 
 static void load_settings() {
-    reset_settings();
-    FILE *f = fopen(CONFIG_FILE, "r");
-    if (!f) {
-        log_line("load_settings: %s missing, using default", CONFIG_FILE);
-        return;
-    }
-
-    char key[64];
-    int val;
-    while (fscanf(f, "%63s %d\n", key, &val) == 2) {
-        if (strcmp(key, "setting_msaaMode") == 0)
-            msaa_mode = sanitize_msaa(val);
-        else if (strcmp(key, "setting_frameRate") == 0)
-            frame_rate = settings_sanitize_frame_rate(val);
-        else if (strcmp(key, "setting_resolution") == 0)
-            resolution = settings_sanitize_resolution(val);
-        else if (strcmp(key, "setting_nativeUi") == 0)
-            native_ui = val != 0;
-        else if (strcmp(key, "setting_pcRules") == 0)
-            pc_rules = (val != 0) ? 1 : 0;
-        else if (strcmp(key, "setting_pcSpeed") == 0)
-            pc_speed = (val != 0) ? 1 : 0;
-        else if (strcmp(key, "setting_language") == 0)
-            language = settings_sanitize_language(val);
-        else if (strcmp(key, "setting_buildType") == 0)
-            build_type = (val == 0 || val == 1) ? val : 0;
-        else if (strcmp(key, "setting_lowPerformance") == 0)
-            low_performance = (val != 0) ? 1 : 0;
-        else if (strcmp(key, "setting_motionBlurSamples") == 0)
-            motion_blur_samples = settings_sanitize_motion_blur_samples(val);
-        else if (strcmp(key, "setting_reduceGhostTrails") == 0)
-            reduce_ghost_trails = (val != 0) ? 1 : 0;
-        else if (strcmp(key, "setting_ghostChainTrails") == 0)
-            ghost_chain_trails = (val != 0) ? 1 : 0;
-        else if (strcmp(key, "setting_ghostEyeTrails") == 0)
-            ghost_eye_trails = (val != 0) ? 1 : 0;
-        else if (strcmp(key, "setting_mazeWobble") == 0)
-            maze_wobble = (val != 0) ? 1 : 0;
-        else if (strcmp(key, "setting_dangerZoom") == 0)
-            danger_zoom = (val != 0) ? 1 : 0;
-        else if (strcmp(key, "setting_motionBlur") == 0)
-            motion_blur = (val != 0) ? 1 : 0;
-        else if (strcmp(key, "setting_ghostAfterimages") == 0)
-            ghost_afterimages = (val != 0) ? 1 : 0;
-        else if (strcmp(key, "setting_ghostEatOutline") == 0)
-            ghost_eat_outline = (val != 0) ? 1 : 0;
-        else if (strcmp(key, "setting_pacmanLight") == 0)
-            pacman_light = (val != 0) ? 1 : 0;
-        else if (strcmp(key, "setting_powerPalette") == 0)
-            power_palette = (val != 0) ? 1 : 0;
-        else if (strcmp(key, "setting_powerFlash") == 0)
-            power_flash = (val != 0) ? 1 : 0;
-        else if (strcmp(key, "setting_powerPulse") == 0)
-            power_pulse = (val != 0) ? 1 : 0;
-        else if (strcmp(key, "setting_mazeGlow") == 0)
-            maze_glow = (val != 0) ? 1 : 0;
-        else if (strcmp(key, "setting_impactRipples") == 0)
-            impact_ripples = (val != 0) ? 1 : 0;
-        else if (strcmp(key, "setting_ghostEatParticles") == 0)
-            ghost_eat_particles = (val != 0) ? 1 : 0;
-        else if (strcmp(key, "setting_unlockAllContent") == 0 || strcmp(key, "setting_accessAllMissions") == 0)
-            all_content = (val != 0) ? 1 : 0;
-        else if (strcmp(key, "setting_dummy") == 0)
-            dummy_setting = (val != 0) ? 1 : 0;
-    }
-    fclose(f);
-    log_line("load_settings: msaa=%d build_type=%d low_perf=%d all_content=%d dummy=%d",
-             msaa_mode, build_type, low_performance, all_content, dummy_setting);
+    settings_load();
+    log_line("load_settings: preset=%d", setting_graphicsPreset);
 }
 
 static void save_settings() {
     sceIoMkdir(CONFIG_DIR, 0777);
-
-    FILE *f = fopen(CONFIG_FILE, "w");
-    if (!f) {
-        log_line("save_settings: fopen failed");
-        return;
-    }
-
-    fprintf(f, "setting_sampleSetting 1\n");
-    fprintf(f, "setting_pcRules %d\n", pc_rules ? 1 : 0);
-    fprintf(f, "setting_pcSpeed %d\n", pc_speed ? 1 : 0);
-    fprintf(f, "setting_language %d\n", settings_sanitize_language(language));
-    fprintf(f, "setting_sampleSetting2 1\n");
-    fprintf(f, "setting_msaaMode %d\n", sanitize_msaa(msaa_mode));
-    fprintf(f, "setting_frameRate %d\n", settings_sanitize_frame_rate(frame_rate));
-    fprintf(f, "setting_resolution %d\n", settings_sanitize_resolution(resolution));
-    fprintf(f, "setting_nativeUi %d\n", native_ui ? 1 : 0);
-    fprintf(f, "setting_buildType %d\n", (build_type == 0 || build_type == 1) ? build_type : 0);
-    fprintf(f, "setting_lowPerformance %d\n", low_performance ? 1 : 0);
-    fprintf(f, "setting_motionBlurSamples %d\n", settings_sanitize_motion_blur_samples(motion_blur_samples));
-    fprintf(f, "setting_reduceGhostTrails %d\n", reduce_ghost_trails ? 1 : 0);
-    fprintf(f, "setting_ghostChainTrails %d\n", ghost_chain_trails ? 1 : 0);
-    fprintf(f, "setting_ghostEyeTrails %d\n", ghost_eye_trails ? 1 : 0);
-    fprintf(f, "setting_mazeWobble %d\n", maze_wobble ? 1 : 0);
-    fprintf(f, "setting_dangerZoom %d\n", danger_zoom ? 1 : 0);
-    fprintf(f, "setting_motionBlur %d\n", motion_blur ? 1 : 0);
-    fprintf(f, "setting_ghostAfterimages %d\n", ghost_afterimages ? 1 : 0);
-    fprintf(f, "setting_ghostEatOutline %d\n", ghost_eat_outline ? 1 : 0);
-    fprintf(f, "setting_pacmanLight %d\n", pacman_light ? 1 : 0);
-    fprintf(f, "setting_powerPalette %d\n", power_palette ? 1 : 0);
-    fprintf(f, "setting_powerFlash %d\n", power_flash ? 1 : 0);
-    fprintf(f, "setting_powerPulse %d\n", power_pulse ? 1 : 0);
-    fprintf(f, "setting_mazeGlow %d\n", maze_glow ? 1 : 0);
-    fprintf(f, "setting_impactRipples %d\n", impact_ripples ? 1 : 0);
-    fprintf(f, "setting_ghostEatParticles %d\n", ghost_eat_particles ? 1 : 0);
-    fprintf(f, "setting_unlockAllContent %d\n", all_content ? 1 : 0);
-    fprintf(f, "setting_dummy %d\n", dummy_setting ? 1 : 0);
-    fclose(f);
-    log_line("save_settings: wrote msaa=%d build_type=%d low_perf=%d all_content=%d dummy=%d",
-             msaa_mode, build_type, low_performance, all_content, dummy_setting);
+    log_line("save_settings: preset=%d success=%d", setting_graphicsPreset,
+             settings_save() ? 1 : 0);
 }
 
 static bool pressed(uint32_t now, uint32_t prev, uint32_t button) {
@@ -393,13 +236,14 @@ static void draw_row(float x, float y, float w, const char *label, const char *v
     if (locked) {
         bg = selected ? RGBA8(62, 70, 84, 255) : RGBA8(30, 36, 46, 255);
         fg = vg = RGBA8(166, 174, 188, 255);
-        value = "LOCKED";
     }
 
     vita2d_draw_rectangle(x, y, w, 58.0f, bg);
     if (selected && locked)
         vita2d_draw_rectangle(x, y, 4.0f, 58.0f, RGBA8(242, 210, 64, 255));
-    draw_label((int)x + 18, (int)y + 38, fg, 1.0f, label);
+    draw_label((int)x + 18, (int)y + (locked ? 26 : 38), fg, 1.0f, label);
+    if (locked)
+        draw_label((int)x + 18, (int)y + 47, fg, 0.6f, "LOCKED BY PRESET");
     if (value && g_font)
         draw_label((int)(x + w) - 18 - vita2d_pgf_text_width(g_font, 1.0f, value),
                    (int)y + 38, vg, 1.0f, value);
@@ -421,16 +265,19 @@ static const char *option_hint() {
     const MenuDesc &page = menus[current_menu];
     if (selected_row < page.count) {
         if (option_locked(page.options[selected_row]))
-            return "Turn ULTRA LOW SETTINGS off in Graphics to unlock these options.";
+            return "Select Custom in Graphics > Preset to unlock these settings.";
+        const int preset = page.options[selected_row] - OPT_PRESET_ULTRA_LOW;
+        if (preset >= 0 && preset < SETTING_PRESET_COUNT)
+            return settings_preset_description(preset);
         switch (page.options[selected_row]) {
             case OPT_OPEN_GAMEPLAY: return "Game speed, gameplay rules and content access.";
-            case OPT_OPEN_GRAPHICS: return "Resolution, frame rate, lighting, colors and camera effects.";
+            case OPT_OPEN_GRAPHICS: return "Graphics presets, visual effects and intensive graphics options.";
             case OPT_FRAME_RATE: return "30 FPS reduces rendering load while keeping normal game speed.";
             case OPT_RESOLUTION: return "Lower resolutions look softer and reduce rendering load. Applies next launch.";
             case OPT_NATIVE_UI: return "Native menus and HUD at lower game resolutions. Adds rendering cost.";
-            case OPT_OPEN_INTENSIVE: return "Effects and quality options that can reduce frame rate.";
+            case OPT_OPEN_INTENSIVE: return "Frame rate, gameplay/UI resolutions, and effects that can reduce frame rate.";
             case OPT_OPEN_SYSTEM: return "Game language and release/debug selection.";
-            case OPT_LOW_PERF: return "Disables other graphics options. Saved choices return when switched off.";
+            case OPT_OPEN_PRESETS: return settings_preset_description(setting_graphicsPreset);
             case OPT_GHOST_EAT_PARTICLES: return "Blue streaks and gold sparks on ghost eats. Particle count is limited.";
             case OPT_MAZE_GLOW: return "High rendering cost. Can substantially reduce frame rate.";
             case OPT_MSAA: return "Smooths jagged edges. Higher levels can reduce frame rate.";
@@ -439,8 +286,7 @@ static const char *option_hint() {
             default: break;
         }
     }
-    return current_menu == MENU_INTENSIVE ? "Test one option at a time to compare frame rate."
-                                         : "SAVE & EXIT keeps changes from every submenu.";
+    return "";
 }
 
 static void render_frame() {
@@ -469,39 +315,45 @@ static void render_frame() {
         "SYSTEM", "JAPANESE", "ENGLISH", "FRENCH", "ITALIAN", "GERMAN",
         "SPANISH", "RUSSIAN", "CHINESE (SIMPL.)", "KOREAN", "PORTUGUESE (BR)"
     };
+    char preset_value[96];
+    snprintf(preset_value, sizeof(preset_value), "%s >", settings_preset_name(setting_graphicsPreset));
     OptionDesc options[OPTION_COUNT] = {
-        {"GAMEPLAY SPEED",         pc_speed ? "PC" : "ANDROID"},
-        {"PC GAMEPLAY RULES",      pc_rules ? "ON" : "OFF"},
-        {"GAME LANGUAGE",         languages[settings_sanitize_language(language) + 1]},
-        {"MSAA ANTI-ALIASING",    msaa_to_string(msaa_mode)},
-        {"BUILD TYPE",            build_type ? "DEBUG" : "RELEASE"},
-        {"ULTRA LOW SETTINGS",    low_performance ? "ON" : "OFF"},
-        {"MOTION BLUR",            motion_blur ? "ON" : "OFF"},
-        {"MOTION BLUR SAMPLES",    motion_blur_samples == 8 ? "8 (ORIGINAL)" :
-                                  motion_blur_samples == 2 ? "2 (FASTEST)" : "4 (FASTER)"},
-        {"GHOST AFTERIMAGES",      ghost_afterimages ? "ON" : "OFF"},
-        {"GHOST AFTERIMAGE QUALITY", reduce_ghost_trails ? "REDUCED" : "FULL"},
-        {"GHOST CHAIN TRAIL",      ghost_chain_trails ? "ON" : "OFF"},
-        {"GHOST EYE TRAILS",       ghost_eye_trails ? "ON" : "OFF"},
-        {"POWERED MAZE WOBBLE",    maze_wobble ? "ON" : "OFF"},
-        {"GHOST-EAT OUTLINE",        ghost_eat_outline ? "ON" : "OFF"},
-        {"PAC-MAN LIGHTING",         pacman_light ? "ON" : "OFF"},
-        {"POWER-UP PALETTE",         power_palette ? "ON" : "OFF"},
-        {"POWER-UP FLASHES",         power_flash ? "ON" : "OFF"},
-        {"POWER-UP PULSE",           power_pulse ? "ON" : "OFF"},
-        {"MAZE GLOW",                maze_glow ? "ON" : "OFF"},
-        {"IMPACT RIPPLES",           impact_ripples ? "ON" : "OFF"},
-        {"DANGER ZOOM",            danger_zoom ? "ON" : "OFF"},
-        {"UNLOCK ALL CONTENT",   all_content ? "ON" : "OFF"},
-        {"GHOST-EAT PARTICLES",    ghost_eat_particles ? "ON" : "OFF"},
-        {"FRAME RATE",            frame_rate == 30 ? "30 FPS" : "60 FPS"},
-        {"RESOLUTION",            settings_resolution_to_string(resolution)},
-        {"UI RESOLUTION",         native_ui ? "NATIVE (960x544)" : "SAME AS GAME"},
+        {"GAMEPLAY SPEED",         setting_pcSpeed ? "PC" : "ANDROID"},
+        {"PC GAMEPLAY RULES",      setting_pcRules ? "ON" : "OFF"},
+        {"GAME LANGUAGE",         languages[settings_sanitize_language(setting_language) + 1]},
+        {"MSAA ANTI-ALIASING",    settings_msaa_to_string(setting_msaaMode)},
+        {"BUILD TYPE",            setting_buildType ? "DEBUG" : "RELEASE"},
+        {"PRESET",                preset_value},
+        {"MOTION BLUR",            setting_motionBlur ? "ON" : "OFF"},
+        {"MOTION BLUR SAMPLES",    setting_motionBlurSamples == 8 ? "8 (ORIGINAL)" :
+                                  setting_motionBlurSamples == 2 ? "2 (FASTEST)" : "4 (FASTER)"},
+        {"GHOST AFTERIMAGES",      setting_ghostAfterimages ? "ON" : "OFF"},
+        {"GHOST AFTERIMAGE QUALITY", setting_reduceGhostTrails ? "REDUCED" : "FULL"},
+        {"GHOST CHAIN TRAIL",      setting_ghostChainTrails ? "ON" : "OFF"},
+        {"GHOST EYE TRAILS",       setting_ghostEyeTrails ? "ON" : "OFF"},
+        {"POWERED MAZE WOBBLE",    setting_mazeWobble ? "ON" : "OFF"},
+        {"GHOST-EAT OUTLINE",        setting_ghostEatOutline ? "ON" : "OFF"},
+        {"PAC-MAN LIGHTING",         setting_pacmanLight ? "ON" : "OFF"},
+        {"POWER-UP PALETTE",         setting_powerPalette ? "ON" : "OFF"},
+        {"POWER-UP FLASHES",         setting_powerFlash ? "ON" : "OFF"},
+        {"POWER-UP PULSE",           setting_powerPulse ? "ON" : "OFF"},
+        {"MAZE GLOW",                setting_mazeGlow ? "ON" : "OFF"},
+        {"IMPACT RIPPLES",           setting_impactRipples ? "ON" : "OFF"},
+        {"DANGER ZOOM",            setting_dangerZoom ? "ON" : "OFF"},
+        {"UNLOCK ALL CONTENT",   setting_unlockAllContent ? "ON" : "OFF"},
+        {"GHOST-EAT PARTICLES",    setting_ghostEatParticles ? "ON" : "OFF"},
+        {"FRAME RATE",            setting_frameRate == 30 ? "30 FPS" : "60 FPS"},
+        {"RESOLUTION",            settings_resolution_to_string(setting_resolution)},
+        {"UI RESOLUTION",         setting_nativeUi ? "NATIVE (960x544)" : "SAME AS GAME"},
         {"GAMEPLAY",              ">"},
         {"GRAPHICS",              ">"},
         {"INTENSIVE GRAPHICS",    ">"},
         {"SYSTEM",                ">"},
     };
+    for (int preset = 0; preset < SETTING_PRESET_COUNT; ++preset)
+        options[OPT_PRESET_ULTRA_LOW + preset] = {
+            settings_preset_name(preset), setting_graphicsPreset == preset ? "SELECTED" : ""
+        };
 
     const MenuDesc &page = menus[current_menu];
     const float list_x = 96.0f;
@@ -525,7 +377,12 @@ static void render_frame() {
         draw_scroll_arrow_up(arrow_x, base_y + 14, arrow_color);
     if (scroll_offset + VISIBLE_OPTIONS < page.count)
         draw_scroll_arrow_down(arrow_x, base_y + VISIBLE_OPTIONS * row_height - 14, arrow_color);
-    draw_label((int)list_x, 448, RGBA8(188, 198, 218, 255), 0.8f, option_hint());
+    const char *hint = option_hint();
+    float hint_scale = 0.8f;
+    int hint_width = g_font ? vita2d_pgf_text_width(g_font, hint_scale, hint) : 0;
+    if (hint_width > list_w)
+        hint_scale *= list_w / hint_width;
+    draw_label((int)list_x, 448, RGBA8(188, 198, 218, 255), hint_scale, hint);
 
     const float btn_y = 456.0f;
     const float btn_w = 376.0f;
@@ -581,113 +438,109 @@ static void cycle_option(int idx, int direction) {
     /* direction: +1 = forward/right, -1 = backward/left. */
     switch (idx) {
         case OPT_FRAME_RATE:
-            frame_rate = frame_rate == 30 ? 60 : 30;
+            setting_frameRate = setting_frameRate == 30 ? 60 : 30;
             dirty = true;
             break;
         case OPT_RESOLUTION:
-            resolution = (settings_sanitize_resolution(resolution) +
+            setting_resolution = (settings_sanitize_resolution(setting_resolution) +
                           (direction > 0 ? 1 : SETTING_RESOLUTION_COUNT - 1)) % SETTING_RESOLUTION_COUNT;
             dirty = true;
             break;
         case OPT_NATIVE_UI:
-            native_ui = !native_ui;
+            setting_nativeUi = !setting_nativeUi;
             dirty = true;
             break;
         case OPT_GAMEPLAY_SPEED:
-            pc_speed = pc_speed ? 0 : 1;
+            setting_pcSpeed = setting_pcSpeed ? 0 : 1;
             dirty = true;
             break;
         case OPT_PC_RULES:
-            pc_rules = pc_rules ? 0 : 1;
+            setting_pcRules = setting_pcRules ? 0 : 1;
             dirty = true;
             break;
         case OPT_LANGUAGE:
-            language += direction > 0 ? 1 : -1;
-            if (language >= SETTING_LANGUAGE_COUNT) language = SETTING_LANGUAGE_SYSTEM;
-            if (language < SETTING_LANGUAGE_SYSTEM) language = SETTING_LANGUAGE_COUNT - 1;
+            setting_language += direction > 0 ? 1 : -1;
+            if (setting_language >= SETTING_LANGUAGE_COUNT) setting_language = SETTING_LANGUAGE_SYSTEM;
+            if (setting_language < SETTING_LANGUAGE_SYSTEM) setting_language = SETTING_LANGUAGE_COUNT - 1;
             dirty = true;
             break;
         case OPT_MSAA:
-            msaa_mode = (msaa_mode + (direction > 0 ? 1 : 2)) % 3;
+            setting_msaaMode = (setting_msaaMode + (direction > 0 ? 1 : 2)) % 3;
             dirty = true;
             break;
         case OPT_BUILD_TYPE:
-            build_type = build_type ? 0 : 1;
-            dirty = true;
-            break;
-        case OPT_LOW_PERF:
-            low_performance = low_performance ? 0 : 1;
+            setting_buildType = setting_buildType ? 0 : 1;
             dirty = true;
             break;
         case OPT_MOTION_BLUR:
             if (direction > 0)
-                motion_blur_samples = motion_blur_samples == 2 ? 4 : motion_blur_samples == 4 ? 8 : 2;
+                setting_motionBlurSamples = setting_motionBlurSamples == 2 ? 4 : setting_motionBlurSamples == 4 ? 8 : 2;
             else
-                motion_blur_samples = motion_blur_samples == 8 ? 4 : motion_blur_samples == 4 ? 2 : 8;
+                setting_motionBlurSamples = setting_motionBlurSamples == 8 ? 4 : setting_motionBlurSamples == 4 ? 2 : 8;
             dirty = true;
             break;
         case OPT_GHOST_TRAILS:
-            reduce_ghost_trails = reduce_ghost_trails ? 0 : 1;
+            setting_reduceGhostTrails = setting_reduceGhostTrails ? 0 : 1;
             dirty = true;
             break;
         case OPT_GHOST_CHAIN_TRAIL:
-            ghost_chain_trails = ghost_chain_trails ? 0 : 1;
+            setting_ghostChainTrails = setting_ghostChainTrails ? 0 : 1;
             dirty = true;
             break;
         case OPT_MAZE_WOBBLE:
-            maze_wobble = maze_wobble ? 0 : 1;
+            setting_mazeWobble = setting_mazeWobble ? 0 : 1;
             dirty = true;
             break;
         case OPT_MOTION_BLUR_ENABLED:
-            motion_blur = motion_blur ? 0 : 1;
+            setting_motionBlur = setting_motionBlur ? 0 : 1;
             dirty = true;
             break;
         case OPT_GHOST_AFTERIMAGES:
-            ghost_afterimages = ghost_afterimages ? 0 : 1;
+            setting_ghostAfterimages = setting_ghostAfterimages ? 0 : 1;
             dirty = true;
             break;
         case OPT_GHOST_EAT_OUTLINE:
-            ghost_eat_outline = ghost_eat_outline ? 0 : 1;
+            setting_ghostEatOutline = setting_ghostEatOutline ? 0 : 1;
             dirty = true;
             break;
         case OPT_PACMAN_LIGHT:
-            pacman_light = pacman_light ? 0 : 1;
+            setting_pacmanLight = setting_pacmanLight ? 0 : 1;
             dirty = true;
             break;
         case OPT_POWER_PALETTE:
-            power_palette = power_palette ? 0 : 1;
+            setting_powerPalette = setting_powerPalette ? 0 : 1;
             dirty = true;
             break;
         case OPT_POWER_FLASH:
-            power_flash = power_flash ? 0 : 1;
+            setting_powerFlash = setting_powerFlash ? 0 : 1;
             dirty = true;
             break;
         case OPT_POWER_PULSE:
-            power_pulse = power_pulse ? 0 : 1;
+            setting_powerPulse = setting_powerPulse ? 0 : 1;
             dirty = true;
             break;
         case OPT_MAZE_GLOW:
-            maze_glow = maze_glow ? 0 : 1;
+            setting_mazeGlow = setting_mazeGlow ? 0 : 1;
             dirty = true;
             break;
         case OPT_IMPACT_RIPPLES:
-            impact_ripples = impact_ripples ? 0 : 1;
+            setting_impactRipples = setting_impactRipples ? 0 : 1;
             dirty = true;
             break;
         case OPT_DANGER_ZOOM:
-            danger_zoom = danger_zoom ? 0 : 1;
+            setting_dangerZoom = setting_dangerZoom ? 0 : 1;
             dirty = true;
             break;
         case OPT_GHOST_EYE_TRAILS:
-            ghost_eye_trails = ghost_eye_trails ? 0 : 1;
+            setting_ghostEyeTrails = setting_ghostEyeTrails ? 0 : 1;
             dirty = true;
             break;
         case OPT_GHOST_EAT_PARTICLES:
-            ghost_eat_particles = ghost_eat_particles ? 0 : 1;
+            setting_ghostEatParticles = setting_ghostEatParticles ? 0 : 1;
             dirty = true;
             break;
         case OPT_ALL_CONTENT:
-            all_content = all_content ? 0 : 1;
+            setting_unlockAllContent = setting_unlockAllContent ? 0 : 1;
             dirty = true;
             break;
         default:
@@ -698,11 +551,23 @@ static void cycle_option(int idx, int direction) {
 static void activate_option(int direction) {
     const OptionIndex option = menus[current_menu].options[selected_row];
     switch (option) {
+        case OPT_OPEN_PRESETS: if (direction > 0) open_menu(MENU_PRESETS); break;
         case OPT_OPEN_GAMEPLAY: if (direction > 0) open_menu(MENU_GAMEPLAY); break;
         case OPT_OPEN_GRAPHICS: if (direction > 0) open_menu(MENU_GRAPHICS); break;
         case OPT_OPEN_INTENSIVE: if (direction > 0) open_menu(MENU_INTENSIVE); break;
         case OPT_OPEN_SYSTEM: if (direction > 0) open_menu(MENU_SYSTEM); break;
-        default: cycle_option(option, direction); break;
+        default:
+            if (option >= OPT_PRESET_ULTRA_LOW && option <= OPT_PRESET_CUSTOM) {
+                const int preset = option - OPT_PRESET_ULTRA_LOW;
+                if (direction > 0 && preset != setting_graphicsPreset) {
+                    settings_apply_graphics_preset(preset);
+                    dirty = true;
+                    reset_notice_until = 0;
+                }
+            } else {
+                cycle_option(option, direction);
+            }
+            break;
     }
 }
 
@@ -715,7 +580,7 @@ static void handle_controls(uint32_t buttons, uint32_t prev_buttons,
             save_on_exit = false;
             running = false;
         } else {
-            open_menu(MENU_MAIN);
+            open_menu(menus[current_menu].parent);
         }
     } else if (pressed(buttons, prev_buttons, SCE_CTRL_UP)) {
         if (selected_row > 0)
@@ -732,7 +597,7 @@ static void handle_controls(uint32_t buttons, uint32_t prev_buttons,
             save_on_exit = true;
             running = false;
         } else if (current_menu != MENU_MAIN) {
-            open_menu(MENU_MAIN);
+            open_menu(menus[current_menu].parent);
         } else {
             save_on_exit = false;
             running = false;

@@ -32,6 +32,17 @@ enum {
     SETTING_RESOLUTION_COUNT
 };
 
+/* Persisted in config.txt; keep these values stable. */
+enum {
+    SETTING_PRESET_ULTRA_LOW = 0,
+    SETTING_PRESET_DEFAULT,
+    SETTING_PRESET_ULTRA_PSP_NATIVE_UI,
+    SETTING_PRESET_ULTRA_PSP,
+    SETTING_PRESET_ULTRA_NATIVE_30,
+    SETTING_PRESET_CUSTOM,
+    SETTING_PRESET_COUNT
+};
+
 enum {
     SETTING_LANGUAGE_SYSTEM = -1,
     SETTING_LANGUAGE_JAPANESE = 0,
@@ -49,12 +60,13 @@ enum {
 
 extern int  setting_sampleSetting;
 extern bool setting_sampleSetting2;
+extern int  setting_graphicsPreset;
 extern int  setting_msaaMode;
 extern int  setting_frameRate;       /* Render at 30 or 60 FPS. */
 extern int  setting_resolution;      /* Display preset, applied at game launch. */
 extern bool setting_nativeUi;        /* Keep UI native while scaling gameplay. */
 extern int  setting_buildType;       /* 0=release, 1=debug/dev */
-extern bool setting_lowPerformance;  /* Native low-performance mode and graphics override. */
+extern bool setting_lowPerformance;  /* Native engine mode, enabled by the Ultra low preset. */
 extern bool setting_unlockAllContent; /* true = bypass content access checks */
 extern int setting_motionBlurSamples; /* 2/4 = reduced, 8 = original */
 extern bool setting_reduceGhostTrails;
@@ -129,9 +141,13 @@ static inline int settings_display_height(void) {
 
 const char *settings_msaa_to_string(int mode);
 int settings_sanitize_msaa_mode(int mode);
+const char *settings_preset_name(int preset);
+const char *settings_preset_description(int preset);
+/* Custom retains the current graphics values and enables individual edits. */
+void settings_apply_graphics_preset(int preset);
 
 void settings_load();
-void settings_save();
+bool settings_save();
 void settings_reset();
 /* Apply after loading preferences, before installing hooks or initializing GL. */
 void settings_apply_runtime_overrides();
