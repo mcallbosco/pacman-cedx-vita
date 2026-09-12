@@ -25,6 +25,11 @@ extern "C" {
 #define LT_SUCCESS 5
 #define LT_WAIT    6
 
+/* Disk logs are diagnostic output, never part of a normal Release run. */
+#if defined(DEBUG_SOLOADER) || defined(ENABLE_AUDIO_LOGS)
+#define SOLOADER_FILE_LOGGING
+#endif
+
 #ifdef DEBUG_SOLOADER
 #define l_debug(...)   _log_print(LT_DEBUG,   __VA_ARGS__)
 #define l_info(...)    _log_print(LT_INFO,    __VA_ARGS__)

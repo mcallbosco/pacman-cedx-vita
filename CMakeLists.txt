@@ -125,6 +125,8 @@ endif()
 
 if (ENABLE_FALSOJNI_VERBOSE)
   add_definitions(-DFALSOJNI_DEBUGLEVEL=0)
+else()
+  add_definitions(-DFALSOJNI_DEBUGLEVEL=4)
 endif()
 
 if (ENABLE_AUDIO_LOGS)

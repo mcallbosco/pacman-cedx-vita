@@ -31,10 +31,8 @@
 #include "utils/ghost_eye_shadow_png.h"
 #include <psp2/kernel/processmgr.h>
 
-/* ===== Profiling counters (shared with java.c) =====
- * Counter storage always lives in java.c (~88 bytes BSS) so externally
- * visible symbols stay linkable; per-call increments and the expensive
- * bookkeeping are gated by ENABLE_IO_PROFILING below. */
+#ifdef ENABLE_IO_PROFILING
+/* Profiling counters are shared with java.c only in profiling builds. */
 extern uint64_t g_prof_open_count;
 extern uint64_t g_prof_open_us;
 extern uint64_t g_prof_read_count;
@@ -46,6 +44,7 @@ extern uint64_t g_prof_ogg_bytes;
 extern uint64_t g_prof_ogg_us;
 extern uint64_t g_prof_other_bytes;
 extern uint64_t g_prof_other_us;
+#endif
 
 static int prof_ends_with(const char *s, const char *ext) {
     if (!s || !ext) return 0;
@@ -198,6 +197,7 @@ static inline void prof_unregister_file(FILE *fp) { (void)fp; }
 // void stat_newlib_to_bionic(struct stat * src, stat64_bionic * dst);
 #include "reimpl/bits/_struct_converters.c"
 
+#ifdef ENABLE_AUDIO_LOGS
 #define BGM_TRACKED_FILES_MAX 64
 
 typedef struct {
@@ -284,6 +284,7 @@ static void bgm_track_close(FILE *fp, int fclose_ret) {
             t->seek_calls, t->path);
     memset(t, 0, sizeof(*t));
 }
+#endif
 
 /* ===== Negative directory cache =====
  *
@@ -496,11 +497,13 @@ FILE * fopen_soloader(const char * filename, const char * mode) {
         pgxt_register_fopen_path(ret, filename);
     }
 
+#ifdef ENABLE_AUDIO_LOGS
     char final_bgm_path[512];
     final_bgm_path[0] = '\0';
     if (is_bgm_path(filename)) {
         snprintf(final_bgm_path, sizeof(final_bgm_path), "%s", filename);
     }
+#endif
 
     if (!ret && strstr(filename, "bgm5_ost_pac_man_ce_")) {
         char alias_path[512];
@@ -517,24 +520,30 @@ FILE * fopen_soloader(const char * filename, const char * mode) {
 #endif
             l_audio("[AUDIO][BGM] alias fopen(%s -> %s, %s): %p",
                     filename, alias_path, mode, ret);
+#ifdef ENABLE_AUDIO_LOGS
             if (ret && is_bgm_path(alias_path)) {
                 snprintf(final_bgm_path, sizeof(final_bgm_path), "%s", alias_path);
             }
+#endif
         }
     }
 
+#ifdef ENABLE_AUDIO_LOGS
     if (strstr(filename, "sound/bgm")) {
         l_audio("[AUDIO][BGM] fopen(%s, %s): %p", filename, mode, ret);
     }
+#endif
 
     if (ret)
         l_debug("fopen(%s, %s): %p", filename, mode, ret);
     else
         l_warn("fopen(%s, %s): %p", filename, mode, ret);
 
+#ifdef ENABLE_AUDIO_LOGS
     if (ret && final_bgm_path[0] != '\0') {
         bgm_track_open(ret, final_bgm_path);
     }
+#endif
 
     /* Animation/text files are read in tight scalar-read loops.
      * Replace the real FILE* with an fmemopen'd buffer
@@ -683,7 +692,9 @@ int fseek_soloader(FILE *stream, long offset, int whence) {
         ret = fseek(stream, offset, whence);
 #endif
     }
+#ifdef ENABLE_AUDIO_LOGS
     bgm_track_seek(stream, offset, whence, ret);
+#endif
     return ret;
 }
 
@@ -788,7 +799,9 @@ int fclose_soloader(FILE * f) {
         ret = fclose(f);
 #endif
     }
+#ifdef ENABLE_AUDIO_LOGS
     bgm_track_close(f, ret);
+#endif
     l_debug("fclose(%p): %i", f, ret);
     return ret;
 }

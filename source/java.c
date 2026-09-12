@@ -57,6 +57,7 @@ typedef struct {
 /* Global state for field access (FalsoJNI fields are global, not per-object) */
 static VitaAPKFile *g_current_apk_file = NULL;
 
+#ifdef ENABLE_IO_PROFILING
 /* ===== Load-time profiling counters =====
  * These aggregate file I/O statistics so we can figure out what
  * actually dominates startup time (PNGs, data files, etc.). */
@@ -93,6 +94,7 @@ static int prof_is_ext(const char *name, const char *ext) {
 
 /* Category tracked per open file for read accounting */
 static int g_prof_current_cat = 0; /* 0=other, 1=png, 2=ogg */
+#endif
 
 /*
  * FileHelper reimplementation
@@ -264,19 +266,23 @@ static jobject apk_openFileAndroid(jmethodID id, va_list args) {
     char path[512];
     snprintf(path, sizeof(path), "%sassets/%s", DATA_PATH, filename);
 
+#ifdef ENABLE_IO_PROFILING
     uint64_t _prof_t0 = prof_now_us();
+#endif
     FILE *fp = fopen(path, "rb");
     if (!fp) {
         /* Try without assets/ prefix */
         snprintf(path, sizeof(path), "%s%s", DATA_PATH, filename);
         fp = fopen(path, "rb");
     }
+#ifdef ENABLE_IO_PROFILING
     g_prof_open_us += prof_now_us() - _prof_t0;
     g_prof_open_count++;
     /* Classify the file by extension for the breakdown */
     if (prof_is_ext(filename, ".png")) g_prof_current_cat = 1;
     else if (prof_is_ext(filename, ".ogg") || prof_is_ext(filename, ".mp3")) g_prof_current_cat = 2;
     else g_prof_current_cat = 0;
+#endif
     if (!fp) {
         l_error("openFileAndroid: cannot open '%s'", filename);
         (*(&jni))->ReleaseStringUTFChars(&jni, filenameStr, filename);
@@ -349,9 +355,13 @@ static void apk_readFileAndroid(jmethodID id, va_list args) {
         apk->bufferSize = numBytes;
     }
 
+#ifdef ENABLE_IO_PROFILING
     uint64_t _prof_rt0 = prof_now_us();
+#endif
     int bytesRead = (int)fread(apk->data->array, 1, numBytes, apk->fp);
+#ifdef ENABLE_IO_PROFILING
     uint64_t _prof_rdt = prof_now_us() - _prof_rt0;
+#endif
     if (bytesRead > 0) {
         int text_patches = pmcedx_patch_text_asset(apk->name, apk->data->array, (size_t)bytesRead);
         if (text_patches > 0) {
@@ -359,6 +369,7 @@ static void apk_readFileAndroid(jmethodID id, va_list args) {
         }
     }
     apk->position += bytesRead;
+#ifdef ENABLE_IO_PROFILING
     g_prof_read_count++;
     g_prof_read_bytes += (uint64_t)bytesRead;
     g_prof_read_us    += _prof_rdt;
@@ -372,6 +383,7 @@ static void apk_readFileAndroid(jmethodID id, va_list args) {
         g_prof_other_bytes += (uint64_t)bytesRead;
         g_prof_other_us    += _prof_rdt;
     }
+#endif
 
     /* Update FalsoJNI fields immediately so native can read data */
     g_current_apk_file = apk;

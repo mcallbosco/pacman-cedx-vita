@@ -74,6 +74,7 @@ static void track_shader_source(GLuint shader, const char *src, size_t len) {
     shader_debug[shader].source_len = len;
 }
 
+#ifdef DEBUG_SOLOADER
 static void dump_shader_source(GLuint shader) {
     if (shader >= MAX_DEBUG_SHADERS)
         return;
@@ -146,6 +147,7 @@ static void dump_program_reflection(GLuint program) {
         }
     }
 }
+#endif
 
 void gl_preload() {
     if (!file_exists("ur0:/data/libshacccg.suprx")
@@ -255,6 +257,7 @@ void glShaderSource_soloader(GLuint shader, GLsizei count,
            shader, (unsigned)clean_len,
            (unsigned char)(str[0]), (unsigned char)(str[1]),
            (unsigned char)(str[2]), (unsigned char)(str[3]));
+#ifdef DEBUG_SOLOADER
     /* Print first 80 chars of shader source */
     {
         char preview[81];
@@ -263,6 +266,7 @@ void glShaderSource_soloader(GLuint shader, GLsizei count,
         preview[plen] = '\0';
         l_info("  src: %s", preview);
     }
+#endif
 
     load_shader(shader, str, clean_len);
 
@@ -308,7 +312,9 @@ void glAttachShader_soloader(GLuint program, GLuint shader) {
     glAttachShader(program, shader);
 }
 
+#ifdef DEBUG_SOLOADER
 static int prog5_link_count = 0;
+#endif
 void glLinkProgram_soloader(GLuint program) {
     game_map_effects_invalidate(program);
     game_map_shader_invalidate(program);
@@ -316,9 +322,11 @@ void glLinkProgram_soloader(GLuint program) {
 #ifdef DEBUG_OPENGL
     sceClibPrintf("[gl_dbg] glLinkProgram<%p>(program: %i)\n", __builtin_return_address(0), program);
 #endif
+#ifdef DEBUG_SOLOADER
     if (program == 5) prog5_link_count++;
     l_info("glLinkProgram: linking program %u (link #%d for prog5)...",
            program, program == 5 ? prog5_link_count : 0);
+#endif
     /* Bind every recognized map variant before its first link, including the
      * installer variant with inactive brightness and projection inputs. */
     if (program == 5 && program < MAX_DEBUG_PROGRAMS) {
@@ -337,6 +345,7 @@ void glLinkProgram_soloader(GLuint program) {
     }
     glLinkProgram(program);
     l_info("glLinkProgram: link call returned for program %u", program);
+#ifdef DEBUG_SOLOADER
     if (program == 5 && program < MAX_DEBUG_PROGRAMS) {
         GLuint vs = program_debug[program].vertex_shader;
         GLuint fs = program_debug[program].fragment_shader;
@@ -356,6 +365,7 @@ void glLinkProgram_soloader(GLuint program) {
         l_info("[RELINK] prog 5 re-linked. u_matScreen loc after 2nd link = %d (0x%x)",
                loc_after, (unsigned)loc_after);
     }
+#endif
 
     GLint linked = GL_FALSE;
     glGetProgramiv(program, GL_LINK_STATUS, &linked);
@@ -381,9 +391,11 @@ void glLinkProgram_soloader(GLuint program) {
         }
     } else {
         l_info("Program %i linked OK", program);
+#ifdef DEBUG_SOLOADER
         if (program == 5) {
             dump_program_reflection(program);
         }
+#endif
     }
 }
 
@@ -413,7 +425,9 @@ void glCompileShader_soloader(GLuint shader) {
                 l_error("Shader %i compile failed (no log)", shader);
             }
         } else if (shader < MAX_DEBUG_SHADERS && shader_debug[shader].type && shader <= 10) {
+#ifdef DEBUG_SOLOADER
             dump_shader_info_log(shader);
+#endif
         }
 #ifdef DUMP_COMPILED_SHADERS
         else {

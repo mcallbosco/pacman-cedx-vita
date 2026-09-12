@@ -21,7 +21,9 @@
 #include "utils/settings.h"
 
 #define CONFIG_DIR  "ux0:data/pacmancedx"
+#ifdef DEBUG_SOLOADER
 #define LOG_FILE    "ux0:data/pacmancedx/configurator.log"
+#endif
 
 enum OptionIndex {
     OPT_GAMEPLAY_SPEED = 0,
@@ -166,6 +168,7 @@ static bool option_locked(int option) {
     return false;
 }
 
+#ifdef DEBUG_SOLOADER
 static void log_line(const char *fmt, ...) {
     sceIoMkdir(CONFIG_DIR, 0777);
 
@@ -183,6 +186,9 @@ static void log_line(const char *fmt, ...) {
     sceIoWrite(fd, "\n", 1);
     sceIoClose(fd);
 }
+#else
+#define log_line(...) ((void)0)
+#endif
 
 /* Require one continuous hold, and release before another reset. */
 static bool update_reset_hold(uint32_t buttons, uint64_t now) {
@@ -215,8 +221,9 @@ static void load_settings() {
 
 static void save_settings() {
     sceIoMkdir(CONFIG_DIR, 0777);
+    const bool saved = settings_save();
     log_line("save_settings: preset=%d success=%d", setting_graphicsPreset,
-             settings_save() ? 1 : 0);
+             saved ? 1 : 0);
 }
 
 static bool pressed(uint32_t now, uint32_t prev, uint32_t button) {
@@ -616,7 +623,9 @@ static void handle_controls(uint32_t buttons, uint32_t prev_buttons,
 }
 
 int main() {
+#ifdef DEBUG_SOLOADER
     sceIoRemove(LOG_FILE);
+#endif
     log_line("main: start");
 
     SceAppUtilInitParam init_param;

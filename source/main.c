@@ -378,12 +378,14 @@ void controls_handler_key(int32_t keycode, ControlsAction action) {
 }
 
 void controls_handler_touch(int32_t id, float x, float y, ControlsAction action) {
+#ifdef DEBUG_SOLOADER
     static int touch_log_count = 0;
     if (touch_log_count < 32) {
         l_info("[TOUCH] id=%d action=%d x=%d y=%d touchEvent=%p multiTouchEvent=%p",
                id, action, (int)x, (int)y, touchEvent, multiTouchEvent);
         touch_log_count++;
     }
+#endif
 
     if (touchEvent) {
         int android_action = (action == CONTROLS_ACTION_DOWN) ? 0 :
@@ -397,10 +399,10 @@ void controls_handler_analog(ControlsStickId which, float x, float y, ControlsAc
 }
 
 /*
- * Abort handler: captures crash register state to debug.log before dying.
- * Registered via kubridge on real hardware — gives us PC, LR, FAR for SIGSEGV.
+ * Exit after a fault; diagnostic builds also save the crash register state.
  */
 static void crash_abort_handler(KuKernelAbortContext *ctx) {
+#ifdef SOLOADER_FILE_LOGGING
     SceUID fd = sceIoOpen(WRITABLE_PATH "debug.log",
                           SCE_O_WRONLY | SCE_O_CREAT | SCE_O_APPEND, 0777);
     if (fd >= 0) {
@@ -443,6 +445,7 @@ static void crash_abort_handler(KuKernelAbortContext *ctx) {
         sceIoWrite(fd, buf, len);
         sceIoClose(fd);
     }
+#endif
     /* Also print to console */
     sceClibPrintf("ABORT: type=%d PC=0x%08X LR=0x%08X FAR=0x%08X\n",
                   ctx->abortType, ctx->pc, ctx->lr, ctx->FAR);
@@ -458,16 +461,18 @@ int main() {
     memset(&appUtilBootParam, 0, sizeof(SceAppUtilBootParam));
     sceAppUtilInit(&appUtilParam, &appUtilBootParam);
 
-    /* Truncate debug log for this run */
+#ifdef SOLOADER_FILE_LOGGING
+    /* Start a fresh log only when diagnostics were explicitly enabled. */
     {
         SceUID fd = sceIoOpen(WRITABLE_PATH "debug.log",
                               SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777);
         if (fd >= 0) sceIoClose(fd);
     }
+#endif
 
     soloader_init_all();
 
-    /* Register abort handler — captures crash PC/LR/FAR to debug.log.
+    /* Register the fault exit handler.
      * Requires kubridge v0.3+ (ur0:/tai/kubridge.skprx). */
     {
         int ret = kuKernelRegisterAbortHandler(crash_abort_handler, NULL, NULL);
