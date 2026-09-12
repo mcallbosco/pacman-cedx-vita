@@ -745,6 +745,7 @@ const GLubyte *glGetString(GLenum name);
 const GLubyte *glGetStringi(GLenum name, GLuint index);
 void glGetTexEnviv(GLenum target, GLenum pname, GLint *params);
 GLuint glGetUniformBlockIndex(GLuint prog, const GLchar *uniformBlockName);
+GLboolean vglCopyUniform(GLint source, GLint destination);
 GLint glGetUniformLocation(GLuint prog, const GLchar *name);
 void glGetVertexAttribfv(GLuint index, GLenum pname, GLfloat *params);
 void glGetVertexAttribiv(GLuint index, GLenum pname, GLint *params);

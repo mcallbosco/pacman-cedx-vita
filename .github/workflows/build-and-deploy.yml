@@ -28,6 +28,9 @@ env:
   # overlaps" (vitasdk/buildscripts#144). Bump when that issue is fixed.
   VITASDK_AUTOBUILD_TAG: master-linux-v2.535
   VITASDK_AUTOBUILD_ASSET: vitasdk-x86_64-linux-gnu-2025-07-20_13-03-36.tar.bz2
+  # Last archive-based installer. Newer vdpm requires a pacman client that
+  # is not included in the pinned v2.535 toolchain.
+  VDPM_COMMIT: e423be457622a9ba517858f4831566dcd263729a
 
 jobs:
   build:
@@ -45,9 +48,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.VITASDK }}
-          key: ${{ env.VITASDK_CACHE_KEY }}
+          key: ${{ env.VITASDK_CACHE_KEY }}-${{ env.VDPM_COMMIT }}
 
-      - name: Install VitaSDK (pinned autobuild + latest headers + vdpm packages)
+      - name: Install VitaSDK (pinned autobuild + latest headers + pinned vdpm)
         if: steps.cache-vitasdk.outputs.cache-hit != 'true'
         run: |
           # 1) Pinned toolchain tarball as base — avoids the GCC 15/binutils
@@ -64,7 +67,9 @@ jobs:
           git clone --depth 1 https://github.com/vitasdk/vita-headers /tmp/vita-headers
           cp -r /tmp/vita-headers/include/. "$VITASDK/arm-vita-eabi/include/"
           # 3) vdpm packages (vitaGL deps, etc.) layered on top.
-          git clone --depth 1 https://github.com/vitasdk/vdpm /tmp/vdpm
+          git init /tmp/vdpm
+          git -C /tmp/vdpm fetch --depth 1 https://github.com/vitasdk/vdpm "$VDPM_COMMIT"
+          git -C /tmp/vdpm checkout --detach FETCH_HEAD
           cd /tmp/vdpm
           ./install-all.sh
 

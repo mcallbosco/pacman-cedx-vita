@@ -27,6 +27,16 @@ extern so_module fmod_mod;
 
 #include "utils/logger.h"
 #include "utils/pgxt.h"
+#include "utils/game_perf.h"
+#include "utils/game_speed.h"
+#include "utils/game_rules.h"
+#include "utils/game_audio.h"
+#include "utils/game_music_io.h"
+#include "utils/game_loading.h"
+#include "utils/game_maze_preload.h"
+#include "utils/game_png.h"
+#include "utils/game_patch.h"
+#include "utils/settings.h"
 #include <stdbool.h>
 
 static int ret0(void) { return 0; }
@@ -46,6 +56,46 @@ static void hide_pause_button_init(void *self) {
     }
 }
 
+static void (*pacman_spark_update_original)(void *);
+static void (*spark_set_position)(void *, int, int);
+
+/* Func() sets the embedded cSprite position, but Momonga's PaintModuleRegion
+ * overwrites it using its own integer position. */
+static void update_pacman_spark_position(void *self) {
+    pacman_spark_update_original(self);
+    uint32_t flags;
+    memcpy(&flags, (char *)self + 0x14, sizeof(flags));
+    if (flags & 0x40) /* Free() marks the task dead for deferred deletion. */
+        return;
+    void *mmg;
+    float position[2];
+    memcpy(&mmg, (char *)self + 0xc0, sizeof(mmg));
+    memcpy(position, (char *)mmg + 0x60, sizeof(position));
+    spark_set_position(mmg, (int)position[0], (int)position[1]);
+}
+
+static void patch_pacman_spark_position(void) {
+    uintptr_t update = game_patch_checked_function(
+        "_ZN9newPacman14cOnPacmanSpark4FuncEv", 0x2b0, 0xd28afe9eu);
+    uintptr_t position = game_patch_checked_function(
+        "_ZN3sys13MomongaSprite11SetPositionEii", 0x2e, 0x858ce9fdu);
+    uintptr_t vtable = so_symbol(&so_mod, "_ZTVN9newPacman14cOnPacmanSparkE");
+    if (!update || !position || !vtable ||
+        !game_patch_checked_function("_ZN9newPacman14cOnPacmanSparkC1Effffff",
+                                     0x150, 0xc14a7cdcu))
+        return;
+
+    /* Replace only this class's Func slot; keep its drawing and trails native. */
+    uintptr_t *slot = (uintptr_t *)(vtable + 0x10);
+    if (*slot != update)
+        return;
+    pacman_spark_update_original = (void (*)(void *))update;
+    spark_set_position = (void (*)(void *, int, int))position;
+    uintptr_t replacement = (uintptr_t)update_pacman_spark_position;
+    kuKernelCpuUnrestrictedMemcpy(slot, &replacement, sizeof(replacement));
+    l_info("Patched Pac-Man spark animation positions.");
+}
+
 typedef int FMOD_RESULT;
 
 #define FMOD_ERR_FILE_NOTFOUND 18
@@ -53,8 +103,8 @@ typedef int FMOD_RESULT;
 #define FMOD_MODE_CREATESTREAM 0x00000080u
 
 static so_hook g_hook_fmod_sys_create_sound_cpp;
-#ifdef ENABLE_AUDIO_LOGS
 static so_hook g_hook_fmod_sys_init;
+#ifdef ENABLE_AUDIO_LOGS
 static so_hook g_hook_fmod_sys_set_output;
 static so_hook g_hook_fmod_sys_set_dsp_buffer;
 static so_hook g_hook_fmod_sys_play_sound_cpp;
@@ -269,16 +319,22 @@ static FMOD_RESULT retry_create_sound_with_path_fixups(void *system,
     return ret;
 }
 
-#ifdef ENABLE_AUDIO_LOGS
 static FMOD_RESULT fmod_system_init_cpp_hook(void *system, int max_channels, uint32_t flags, void *extra_driver_data) {
+    int io_result = game_music_io_install(system);
+    if (io_result != 0)
+        l_warn("FMOD file recovery unavailable: %d", io_result);
+    l_audio("[MUSIC-IO] file callbacks installed result=%d", io_result);
     FMOD_RESULT ret = SO_CONTINUE(FMOD_RESULT, g_hook_fmod_sys_init,
                                   system, max_channels, flags, extra_driver_data);
+#ifdef ENABLE_AUDIO_LOGS
     g_fmod_sys_init_calls++;
     l_audio("[AUDIO][FMODAPI] System::init#%u this=%p maxch=%d flags=0x%08X extra=%p ret=%d",
             g_fmod_sys_init_calls, system, max_channels, flags, extra_driver_data, ret);
+#endif
     return ret;
 }
 
+#ifdef ENABLE_AUDIO_LOGS
 static FMOD_RESULT fmod_system_set_output_cpp_hook(void *system, int output_type) {
     FMOD_RESULT ret = SO_CONTINUE(FMOD_RESULT, g_hook_fmod_sys_set_output, system, output_type);
     g_fmod_sys_set_output_calls++;
@@ -349,6 +405,7 @@ static FMOD_RESULT fmod_system_play_sound_cpp_hook(void *system,
                                                    void **channel) {
     FMOD_RESULT ret = SO_CONTINUE(FMOD_RESULT, g_hook_fmod_sys_play_sound_cpp,
                                   system, sound, channel_group, paused, channel);
+    game_audio_log_play(sound, channel_group, ret, ret == 0 && channel ? *channel : NULL);
     g_fmod_play_sound_calls++;
     if (g_fmod_play_sound_calls <= 240 || ret != 0) {
         l_audio("[AUDIO][FMODAPI] System::playSound#%u this=%p sound=%p group=%p paused=%d ret=%d channel=%p",
@@ -359,6 +416,7 @@ static FMOD_RESULT fmod_system_play_sound_cpp_hook(void *system,
 }
 
 static FMOD_RESULT fmod_sound_release_cpp_hook(void *sound) {
+    game_audio_log_release(sound);
     FMOD_RESULT ret = SO_CONTINUE(FMOD_RESULT, g_hook_fmod_sound_release_cpp, sound);
     g_fmod_sound_release_calls++;
     if (g_fmod_sound_release_calls <= 240 || ret != 0) {
@@ -419,10 +477,12 @@ static void install_fmod_api_hooks(void) {
         l_warn("FMOD createSound hook not installed; BGM path compatibility fix is disabled.");
     }
 
-#ifdef ENABLE_AUDIO_LOGS
     uintptr_t addr_sys_init = install_fmod_hook("_ZN4FMOD6System4initEijPv",
                                                 (void *)&fmod_system_init_cpp_hook,
                                                 &g_hook_fmod_sys_init);
+    if (!addr_sys_init)
+        l_warn("FMOD init hook not installed; music file recovery is disabled.");
+#ifdef ENABLE_AUDIO_LOGS
     uintptr_t addr_set_output = install_fmod_hook("_ZN4FMOD6System9setOutputE15FMOD_OUTPUTTYPE",
                                                   (void *)&fmod_system_set_output_cpp_hook,
                                                   &g_hook_fmod_sys_set_output);
@@ -498,6 +558,64 @@ static void patch_fmod_invalid_handle_guard(void) {
     l_info("Patched FMOD invalid-handle guard at +0x209cc/+0x209ce.");
 }
 
+static uintptr_t earned_lock_caller;
+static void *(*content_get_course)(void *model, int world, int level);
+static int (*content_get_saved_lock)(const void *course);
+
+static int level_access_is_locked(void *model, int world, int level) {
+    /* The achievement checker shares the menu's query. It must still observe
+     * saved progress. Its return address is covered by the signature below. */
+    uintptr_t caller = (uintptr_t)__builtin_return_address(0) & ~(uintptr_t)1;
+    if (caller == earned_lock_caller)
+        return content_get_saved_lock(content_get_course(model, world, level));
+    return 0;
+}
+
+/* Access overrides only: keep the saved lock flags, completion status and
+ * score data intact so disabling the setting restores normal progression. */
+static void install_content_unlocks(void) {
+    if (!setting_unlockAllContent)
+        return;
+
+    uintptr_t level = game_patch_checked_function(
+        "_ZN6pmcedx9GameModel13IsLevelLockedEii", 0x32, 0x78137158u);
+    uintptr_t settings = game_patch_checked_function(
+        "_ZN6pmcedx33SelectLevelSettingsScreen_Premium5SetupEii",
+        0x390, 0xe65de760u);
+    uintptr_t achievement = game_patch_checked_function(
+        "_ZN9newPacman17cGameScoreManager32CheckUnlockAllCoursesAchievementEv",
+        0xa4, 0x7dacda25u);
+    content_get_course = (void *)so_symbol(&so_mod,
+        "_ZN6pmcedx9GameModel14GetCourseParamEii");
+    content_get_saved_lock = (void *)so_symbol(&so_mod,
+        "_ZNK9newPacman12cCourseParam7GetLockEv");
+    /* Install together; an unsupported game library retains normal access. */
+    if (!level || !settings || !achievement ||
+        !content_get_course || !content_get_saved_lock)
+        return;
+
+    earned_lock_caller = (achievement & ~(uintptr_t)1) + 0x60;
+    hook_addr(level, (uintptr_t)level_access_is_locked);
+    /* Setup enables the time-trial variant selector only for play status 3.
+     * NOP its local BNE at +0x76 so the selector is available from the start.
+     * Keep the mode-specific selector table and saved play status unchanged. */
+    const uint16_t nop = 0xbf00;
+    kuKernelCpuUnrestrictedMemcpy((void *)((settings & ~(uintptr_t)1) + 0x76),
+                                 &nop, sizeof(nop));
+}
+
+static void enable_japanese_language(void) {
+    uintptr_t init = game_patch_checked_function(
+        "_ZN3sys14SystemLanguage4InitEv", 0x22c, 0x49f36a1cu);
+    if (!init) return;
+
+    /* The Android TV/build-type restriction replaces Japanese with English.
+     * Let "ja" reach its existing text/font selection at Init+0x17c. */ 
+    const uint16_t branch = 0xe00d; /* b.n +0x17c from +0x15e */
+    kuKernelCpuUnrestrictedMemcpy((void *)((init & ~(uintptr_t)1) + 0x15e),
+                                 &branch, sizeof(branch));
+}
+
 void so_patch(void) {
     patch_fmod_invalid_handle_guard();
     install_fmod_api_hooks();
@@ -537,6 +655,8 @@ void so_patch(void) {
         l_warn("pmcedx::GameScreen_Premium::Init not found; pause button will remain.");
     }
 
+    patch_pacman_spark_position();
+
     /* Stub out social/leaderboard network calls — no online services on Vita.
      * Use direct address patching since so_symbol may not find WEAK symbols. */
     struct { uint32_t offset; const char *name; } social_patches[] = {
@@ -559,6 +679,15 @@ void so_patch(void) {
      * in foo.png.gxt (emitted by the website packager) bypasses libpng's
      * per-pixel CPU decode. Expected win: ~10–15 s of startup → ~1–2 s. */
     pgxt_install_hooks();
+    game_png_install_hooks();
+    game_perf_install_hooks();
+    game_rules_install_hooks();
+    game_speed_install_hooks();
+    game_audio_install_hooks();
+    game_loading_install_hooks();
+    game_maze_preload_install_hooks();
+    install_content_unlocks();
+    enable_japanese_language();
     so_flush_caches(&so_mod);
 
     l_info("Patches applied.");

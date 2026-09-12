@@ -20,6 +20,7 @@ extern "C" {
 #endif
 
 #include <stdio.h>
+#include <stdint.h>
 #include <sys/dirent.h>
 #include <sys/syslimits.h>
 #include <sys/fcntl.h>
@@ -73,6 +74,8 @@ FILE * fopen_soloader(const char * filename, const char * mode);
 size_t fread_soloader(void *ptr, size_t size, size_t nmemb, FILE *stream);
 int fseek_soloader(FILE *stream, long offset, int whence);
 long ftell_soloader(FILE *stream);
+int fgetpos_soloader(FILE *stream, int32_t *position);
+int fsetpos_soloader(FILE *stream, const int32_t *position);
 
 DIR *opendir_soloader(char *name);
 

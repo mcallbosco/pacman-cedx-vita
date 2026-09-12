@@ -55,11 +55,17 @@ The optional PC DAT audio beta accepts the Steam `PAC-MAN.dat` in that same brow
 
 #### Diagnostics (all default `OFF`)
 
+`./build.sh` starts with Release settings and diagnostics disabled, including
+when the build directory previously held a diagnostic build. Explicit command-line
+flags still override those defaults. With diagnostics off, the game and settings
+app do not create `debug.log` or `configurator.log`; errors can still appear on the
+console. Saves, settings and functional shader caches are unaffected.
+
 | Flag | Effect |
 | --- | --- |
-| `ENABLE_RUNTIME_LOGS` | Verbose `.so`-loader log to `ux0:data/pacmancedx/debug.log`. |
+| `ENABLE_RUNTIME_LOGS` | Verbose `.so`-loader log to `ux0:data/pacmancedx/debug.log` and settings-app logging to `configurator.log`. |
 | `ENABLE_GL_DEBUG_HOOKS` | Heavy OpenGL call instrumentation. |
-| `ENABLE_FALSOJNI_VERBOSE` | Sets `FALSOJNI_DEBUGLEVEL=0` so every JNI call and lookup is logged. |
+| `ENABLE_FALSOJNI_VERBOSE` | Sets `FALSOJNI_DEBUGLEVEL=0` so every JNI call and lookup is logged. When off, JNI logging calls are compiled out. |
 | `ENABLE_AUDIO_LOGS` | FMOD / BGM / audio diagnostics. |
 | `ENABLE_IO_PROFILING` | Per-call IO profiling. |
 

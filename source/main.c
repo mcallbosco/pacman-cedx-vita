@@ -14,6 +14,7 @@
 #include "utils/init.h"
 #include "utils/glutil.h"
 #include "utils/settings.h"
+#include "utils/game_frame_rate.h"
 #include "utils/logger.h"
 
 #include <psp2/kernel/threadmgr.h>
@@ -377,12 +378,14 @@ void controls_handler_key(int32_t keycode, ControlsAction action) {
 }
 
 void controls_handler_touch(int32_t id, float x, float y, ControlsAction action) {
+#ifdef DEBUG_SOLOADER
     static int touch_log_count = 0;
     if (touch_log_count < 32) {
         l_info("[TOUCH] id=%d action=%d x=%d y=%d touchEvent=%p multiTouchEvent=%p",
                id, action, (int)x, (int)y, touchEvent, multiTouchEvent);
         touch_log_count++;
     }
+#endif
 
     if (touchEvent) {
         int android_action = (action == CONTROLS_ACTION_DOWN) ? 0 :
@@ -396,10 +399,10 @@ void controls_handler_analog(ControlsStickId which, float x, float y, ControlsAc
 }
 
 /*
- * Abort handler: captures crash register state to debug.log before dying.
- * Registered via kubridge on real hardware — gives us PC, LR, FAR for SIGSEGV.
+ * Exit after a fault; diagnostic builds also save the crash register state.
  */
 static void crash_abort_handler(KuKernelAbortContext *ctx) {
+#ifdef SOLOADER_FILE_LOGGING
     SceUID fd = sceIoOpen(WRITABLE_PATH "debug.log",
                           SCE_O_WRONLY | SCE_O_CREAT | SCE_O_APPEND, 0777);
     if (fd >= 0) {
@@ -442,6 +445,7 @@ static void crash_abort_handler(KuKernelAbortContext *ctx) {
         sceIoWrite(fd, buf, len);
         sceIoClose(fd);
     }
+#endif
     /* Also print to console */
     sceClibPrintf("ABORT: type=%d PC=0x%08X LR=0x%08X FAR=0x%08X\n",
                   ctx->abortType, ctx->pc, ctx->lr, ctx->FAR);
@@ -457,16 +461,18 @@ int main() {
     memset(&appUtilBootParam, 0, sizeof(SceAppUtilBootParam));
     sceAppUtilInit(&appUtilParam, &appUtilBootParam);
 
-    /* Truncate debug log for this run */
+#ifdef SOLOADER_FILE_LOGGING
+    /* Start a fresh log only when diagnostics were explicitly enabled. */
     {
         SceUID fd = sceIoOpen(WRITABLE_PATH "debug.log",
                               SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777);
         if (fd >= 0) sceIoClose(fd);
     }
+#endif
 
     soloader_init_all();
 
-    /* Register abort handler — captures crash PC/LR/FAR to debug.log.
+    /* Register the fault exit handler.
      * Requires kubridge v0.3+ (ur0:/tai/kubridge.skprx). */
     {
         int ret = kuKernelRegisterAbortHandler(crash_abort_handler, NULL, NULL);
@@ -564,7 +570,9 @@ int main() {
     gl_init();
     egl_mark_gl_initialized(); /* Prevent double-init if native code calls eglInitialize */
     PROF_PHASE_END("gl_init");
-    l_info("GL initialized (960x544)");
+    const int render_width = settings_display_width();
+    const int render_height = settings_display_height();
+    l_info("GL initialized (%dx%d)", render_width, render_height);
 
     if (init) {
 #ifdef ENABLE_IO_PROFILING
@@ -574,14 +582,14 @@ int main() {
         uint64_t io_bytes0 = g_prof_read_bytes;
 #endif
         PROF_PHASE_START();
-        init(&jni, NULL, 960, 544);
-        PROF_PHASE_END("init(960,544)");
+        init(&jni, NULL, render_width, render_height);
+        PROF_PHASE_END("init(screen size)");
 #ifdef ENABLE_IO_PROFILING
         l_info("[PROF]   during init: opens=%llu bytes=%llu KB",
                (unsigned long long)(g_prof_open_count - io_opens0),
                (unsigned long long)((g_prof_read_bytes - io_bytes0) / 1024));
 #endif
-        l_info("init(960, 544) done");
+        l_info("init(%d, %d) done", render_width, render_height);
     }
 
     if (nativeSetDPI) {
@@ -676,6 +684,7 @@ int main() {
     int      _prof_last_summary_frame = 0;
 #endif
     while (1) {
+        game_frame_rate_begin_tick();
         controls_poll_touch();
         process_input();
 

@@ -63,6 +63,7 @@ typedef struct {
 so_hook hook_thumb(uintptr_t addr, uintptr_t dst);
 so_hook hook_arm(uintptr_t addr, uintptr_t dst);
 so_hook hook_addr(uintptr_t addr, uintptr_t dst);
+uintptr_t so_alloc_arena(so_module *mod, uintptr_t range, uintptr_t dst, size_t size);
 
 void so_flush_caches(so_module *mod);
 int so_file_load(so_module *mod, const char *filename, uintptr_t load_addr);

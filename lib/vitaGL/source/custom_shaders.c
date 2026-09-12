@@ -42,6 +42,19 @@ char vgl_file_cache_path[256];
 #define MAX_CUSTOM_SHADERS 2048 // Maximum number of linkable custom shaders
 #define MAX_CUSTOM_PROGRAMS 1024 // Maximum number of linkable custom programs
 
+#ifndef SKIP_ERROR_HANDLING
+static int validateDrawTexture(texture *tex) {
+	/* Compare the whole descriptor so storage and sampler changes invalidate it. */
+	if (tex->validation_cached && !memcmp(&tex->validated_tex, &tex->gxm_tex, sizeof(tex->gxm_tex)))
+		return 0;
+	int result = sceGxmTextureValidate(&tex->gxm_tex);
+	tex->validation_cached = result == 0;
+	if (tex->validation_cached)
+		tex->validated_tex = tex->gxm_tex;
+	return result;
+}
+#endif
+
 #define setDefaultAttribBindings() \
 	uint32_t cnt = sceGxmProgramGetParameterCount(p->vshader->prog); \
 	uint32_t *ptr = vglProgramGetParameterBase(p->vshader->prog); \
@@ -246,7 +259,64 @@ char vgl_file_cache_path[256];
 		attributes = cur_vao->vertex_attrib_config; \
 		streams = cur_vao->vertex_stream_config; \
 	}
-	
+
+#if !defined(DRAW_SPEEDHACK) && !defined(SAFER_DRAW_SPEEDHACK) && !defined(STRICT_DRAW_COMPLIANCE)
+/* A constant attribute can precede interleaved client arrays, defeating the
+ * packed path's attribute-zero anchor. Share their upload while retaining
+ * the unpacked stream descriptors and the usual GPU pool lifetime. */
+static GLboolean copyInterleavedClientArrays(unsigned attr_num, const uint8_t *attr_map,
+		const SceGxmVertexAttribute *attributes, const SceGxmVertexStream *streams,
+		GLint first, GLsizei count, void **ptrs) {
+	if (first < 0 || count <= 0)
+		return GL_FALSE;
+	uintptr_t base = UINTPTR_MAX;
+	unsigned stride = 0, enabled = 0, last_end = 0;
+	for (unsigned i = 0; i < attr_num; ++i) {
+		uint8_t attr_idx = attr_map[i];
+		if (!(cur_vao->vertex_attrib_state & (1 << attr_idx)))
+			continue;
+		uintptr_t pointer = cur_vao->vertex_attrib_offsets[attr_idx];
+		if (cur_vao->vertex_attrib_vbo[attr_idx] || !pointer || (pointer & 3) ||
+			attributes[i].format != SCE_GXM_ATTRIBUTE_FORMAT_F32 ||
+			!attributes[i].componentCount || attributes[i].componentCount > 4 ||
+			(streams[i].stride != 32 && streams[i].stride != 40) ||
+			(stride && streams[i].stride != stride))
+			return GL_FALSE;
+		stride = streams[i].stride;
+		if (pointer < base)
+			base = pointer;
+		++enabled;
+	}
+	if (enabled < 2)
+		return GL_FALSE;
+	for (unsigned i = 0; i < attr_num; ++i) {
+		uint8_t attr_idx = attr_map[i];
+		if (!(cur_vao->vertex_attrib_state & (1 << attr_idx)))
+			continue;
+		uintptr_t offset = cur_vao->vertex_attrib_offsets[attr_idx] - base;
+		unsigned bytes = attributes[i].componentCount * sizeof(float);
+		if (offset > stride - bytes)
+			return GL_FALSE;
+		if (offset + bytes > last_end)
+			last_end = offset + bytes;
+	}
+	uint64_t first_byte = (uint64_t)first * stride;
+	uint64_t bytes = (uint64_t)(count - 1) * stride + last_end;
+	if (first_byte > UINTPTR_MAX - base || bytes > UINTPTR_MAX - base - first_byte)
+		return GL_FALSE;
+	void *shared = gpu_alloc_mapped_temp((size_t)bytes);
+	if (!shared)
+		return GL_FALSE;
+	vgl_fast_memcpy(shared, (const void *)(base + (uintptr_t)first_byte), (size_t)bytes);
+	for (unsigned i = 0; i < attr_num; ++i) {
+		uint8_t attr_idx = attr_map[i];
+		if (cur_vao->vertex_attrib_state & (1 << attr_idx))
+			ptrs[i] = (uint8_t *)shared + (cur_vao->vertex_attrib_offsets[attr_idx] - base);
+	}
+	return GL_TRUE;
+}
+#endif
+
 #ifdef HAVE_FFP_SHADER_SUPPORT
 const char *ffp_bind_names[FFP_BINDS_NUM] = {
 	"gl_ModelViewProjectionMatrix",
@@ -373,6 +443,55 @@ typedef struct {
 static shader shaders[MAX_CUSTOM_SHADERS];
 static program progs[MAX_CUSTOM_PROGRAMS];
 
+/* Reuse an identical successful layout request. The shader patcher retains
+ * these programs until shader unregister; this cache owns no extra reference.
+ * Vertex data and GXM program/stream bindings still update on every draw. */
+#define DRAW_LAYOUT_CACHE_SIZE 32
+static struct {
+	program *owner;
+	SceGxmShaderPatcher *patcher;
+	SceGxmShaderPatcherId shader_id;
+	SceGxmVertexProgram *vprog;
+	GLuint count;
+	SceGxmVertexAttribute attributes[VERTEX_ATTRIBS_NUM];
+	SceGxmVertexStream streams[VERTEX_ATTRIBS_NUM];
+} draw_layouts[DRAW_LAYOUT_CACHE_SIZE];
+
+static void invalidateDrawLayout(program *p) {
+	draw_layouts[(p - progs) % DRAW_LAYOUT_CACHE_SIZE].owner = NULL;
+}
+
+static void patchDrawVertexProgram(program *p, const SceGxmVertexAttribute *attributes,
+		const SceGxmVertexStream *streams) {
+	typeof(draw_layouts[0]) *cached = &draw_layouts[(p - progs) % DRAW_LAYOUT_CACHE_SIZE];
+	size_t attr_bytes = p->attr_num * sizeof(*attributes);
+	size_t stream_bytes = p->attr_num * sizeof(*streams);
+	if (cached->owner == p && cached->patcher == gxm_shader_patcher &&
+		cached->shader_id == p->vshader->id && cached->count == p->attr_num &&
+		!memcmp(cached->attributes, attributes, attr_bytes) &&
+		!memcmp(cached->streams, streams, stream_bytes)) {
+		p->vprog = cached->vprog;
+		return;
+	}
+	cached->owner = NULL;
+	int result = sceGxmShaderPatcherCreateVertexProgram(gxm_shader_patcher,
+		p->vshader->id, attributes, p->attr_num, streams, p->attr_num, &p->vprog);
+#ifdef LOG_ERRORS
+	if (result)
+		vgl_log("Vertex shader patching failed (%s) on shader 0x%X with %d attributes and %d streams.\n",
+			get_gxm_error_literal(result), p->vshader->id, p->attr_num, p->attr_num);
+#endif
+	if (!result && p->vprog && p->attr_num <= VERTEX_ATTRIBS_NUM) {
+		cached->owner = p;
+		cached->patcher = gxm_shader_patcher;
+		cached->shader_id = p->vshader->id;
+		cached->vprog = p->vprog;
+		cached->count = p->attr_num;
+		memcpy(cached->attributes, attributes, attr_bytes);
+		memcpy(cached->streams, streams, stream_bytes);
+	}
+}
+
 #ifdef HAVE_SHARK_LOG
 static char *shark_log = NULL;
 #endif
@@ -393,6 +512,9 @@ void release_shader(shader *s) {
 	// Deallocating shader and unregistering it from sceGxmShaderPatcher
 	if (s->valid) {
 		if (s->prog) {
+			for (int i = 0; i < DRAW_LAYOUT_CACHE_SIZE; i++)
+				if (draw_layouts[i].shader_id == s->id)
+					draw_layouts[i].owner = NULL;
 			sceGxmShaderPatcherForceUnregisterProgram(gxm_shader_patcher, s->id);
 			vgl_free((void *)s->prog);
 			while (s->mat) {
@@ -674,6 +796,8 @@ static inline __attribute__((always_inline)) void compile_shader(shader *s, GLbo
 }
 
 void resetCustomShaders(void) {
+	for (int i = 0; i < DRAW_LAYOUT_CACHE_SIZE; i++)
+		draw_layouts[i].owner = NULL;
 	// Init custom shaders
 	for (int i = 0; i < MAX_CUSTOM_SHADERS; i++) {
 		shaders[i].valid = GL_FALSE;
@@ -710,7 +834,7 @@ void _glMultiDrawArrays_CustomShadersIMPL(SceGxmPrimitiveType gxm_p, uint16_t *i
 			restoreTexCache(tex);
 #endif
 #ifndef SKIP_ERROR_HANDLING
-			int r = sceGxmTextureValidate(&tex->gxm_tex);
+			int r = validateDrawTexture(tex);
 			if (r) {
 				vgl_log("%s:%d glDrawArrays: Fragment %s texture on TEXUNIT%d is invalid (%s), draw will be skipped.\n", __FILE__, __LINE__, tex_type ? "cube" : "2D", i, get_gxm_error_literal(r));
 				return;
@@ -762,7 +886,7 @@ void _glMultiDrawArrays_CustomShadersIMPL(SceGxmPrimitiveType gxm_p, uint16_t *i
 			uint8_t tex_type = p->vert_texunits[i]->size ? 2 : tex2d_override;
 			texture *tex = &texture_slots[tex_unit->tex_id[tex_type]];
 #ifndef SKIP_ERROR_HANDLING
-			int r = sceGxmTextureValidate(&tex->gxm_tex);
+			int r = validateDrawTexture(tex);
 			if (r) {
 				vgl_log("%s:%d glMultiDrawArrays: Vertex %s texture on TEXUNIT%d is invalid (%s), draw will be skipped.\n", __FILE__, __LINE__, tex_type ? "cube" : "2D", i, get_gxm_error_literal(r));
 				return;
@@ -872,7 +996,7 @@ void _glMultiDrawArrays_CustomShadersIMPL(SceGxmPrimitiveType gxm_p, uint16_t *i
 #endif
 
 	// Uploading new vertex program
-	patchVertexProgram(gxm_shader_patcher, p->vshader->id, attributes, p->attr_num, streams, p->attr_num, &p->vprog);
+	patchDrawVertexProgram(p, attributes, streams);
 	sceGxmSetVertexProgram(gxm_context, p->vprog);
 
 	// Uploading both fragment and vertex uniforms data
@@ -927,7 +1051,7 @@ GLboolean _glDrawArrays_CustomShadersIMPL(GLint first, GLsizei count, GLboolean 
 			restoreTexCache(tex);
 #endif
 #ifndef SKIP_ERROR_HANDLING
-			int r = sceGxmTextureValidate(&tex->gxm_tex);
+			int r = validateDrawTexture(tex);
 			if (r) {
 				vgl_log("%s:%d glDrawArrays: Fragment %s texture on TEXUNIT%d is invalid (%s), draw will be skipped.\n", __FILE__, __LINE__, tex_type ? "cube" : "2D", i, get_gxm_error_literal(r));
 				return GL_FALSE;
@@ -979,7 +1103,7 @@ GLboolean _glDrawArrays_CustomShadersIMPL(GLint first, GLsizei count, GLboolean 
 			uint8_t tex_type = p->vert_texunits[i]->size ? 2 : tex2d_override;
 			texture *tex = &texture_slots[tex_unit->tex_id[tex_type]];
 #ifndef SKIP_ERROR_HANDLING
-			int r = sceGxmTextureValidate(&tex->gxm_tex);
+			int r = validateDrawTexture(tex);
 			if (r) {
 				vgl_log("%s:%d glDrawArrays: Vertex %s texture on TEXUNIT%d is invalid (%s), draw will be skipped.\n", __FILE__, __LINE__, tex_type ? "cube" : "2D", i, get_gxm_error_literal(r));
 				return GL_FALSE;
@@ -1087,6 +1211,20 @@ GLboolean _glDrawArrays_CustomShadersIMPL(GLint first, GLsizei count, GLboolean 
 			attributes[i].regIndex = p->attr[attr_idx].regIndex;
 			handlePackedAttrib();
 		}
+#ifndef SAFER_DRAW_SPEEDHACK
+	/* Keep small draws on the original path to avoid layout-validation cost. */
+	} else if (!instanced && count >= 32 && copyInterleavedClientArrays(p->attr_num, p->attr_map,
+			attributes, streams, first, count, ptrs)) {
+		for (int i = 0; i < p->attr_num; i++) {
+			uint8_t attr_idx = p->attr_map[i];
+			attributes[i].regIndex = p->attr[attr_idx].regIndex;
+			if (cur_vao->vertex_attrib_state & (1 << attr_idx)) {
+				attributes[i].offset = 0;
+			} else {
+				disableDrawAttrib(i)
+			}
+		}
+#endif
 	} else {
 		for (int i = 0; i < p->attr_num; i++) {
 			uint8_t attr_idx = p->attr_map[i];
@@ -1113,7 +1251,7 @@ GLboolean _glDrawArrays_CustomShadersIMPL(GLint first, GLsizei count, GLboolean 
 #endif
 
 	// Uploading new vertex program
-	patchVertexProgram(gxm_shader_patcher, p->vshader->id, attributes, p->attr_num, streams, p->attr_num, &p->vprog);
+	patchDrawVertexProgram(p, attributes, streams);
 	sceGxmSetVertexProgram(gxm_context, p->vprog);
 
 	// Uploading both fragment and vertex uniforms data
@@ -1173,7 +1311,7 @@ GLboolean _glDrawElements_CustomShadersIMPL(uint16_t *idx_buf, GLsizei count, ui
 			restoreTexCache(tex);
 #endif
 #ifndef SKIP_ERROR_HANDLING
-			int r = sceGxmTextureValidate(&tex->gxm_tex);
+			int r = validateDrawTexture(tex);
 			if (r) {
 				vgl_log("%s:%d glDrawElements: Fragment %s texture on TEXUNIT%d is invalid (%s), draw will be skipped.\n", __FILE__, __LINE__, tex_type ? "cube" : "2D", i, get_gxm_error_literal(r));
 				return GL_FALSE;
@@ -1225,7 +1363,7 @@ GLboolean _glDrawElements_CustomShadersIMPL(uint16_t *idx_buf, GLsizei count, ui
 			uint8_t tex_type = p->vert_texunits[i]->size ? 2 : tex2d_override;
 			texture *tex = &texture_slots[tex_unit->tex_id[tex_type]];
 #ifndef SKIP_ERROR_HANDLING
-			int r = sceGxmTextureValidate(&tex->gxm_tex);
+			int r = validateDrawTexture(tex);
 			if (r) {
 				vgl_log("%s:%d glDrawElements: Vertex %s texture on TEXUNIT%d is invalid (%s), draw will be skipped.\n", __FILE__, __LINE__, tex_type ? "cube" : "2D", i, get_gxm_error_literal(r));
 				return GL_FALSE;
@@ -1387,7 +1525,7 @@ GLboolean _glDrawElements_CustomShadersIMPL(uint16_t *idx_buf, GLsizei count, ui
 #endif
 
 	// Uploading new vertex program
-	patchVertexProgram(gxm_shader_patcher, p->vshader->id, attributes, p->attr_num, streams, p->attr_num, &p->vprog);
+	patchDrawVertexProgram(p, attributes, streams);
 	sceGxmSetVertexProgram(gxm_context, p->vprog);
 
 	// Uploading both fragment and vertex uniforms data
@@ -1843,6 +1981,7 @@ GLuint glCreateProgram(void) {
 		// Program slot found, reserving and initializing it
 		if (!(progs[i - 1].status)) {
 			res = i--;
+			invalidateDrawLayout(&progs[i]);
 			progs[i].status = PROG_UNLINKED;
 			progs[i].attr_num = 0;
 #ifdef ENABLE_LEGACY_PIPELINE
@@ -1959,8 +2098,13 @@ void glProgramBinary(GLuint prog, GLenum binaryFormat, const void *binary, GLsiz
 }
 
 void glDeleteProgram(GLuint prog) {
+	if (cur_program == prog) {
+		dirty_frag_unifs = GL_TRUE;
+		dirty_vert_unifs = GL_TRUE;
+	}
 	// Grabbing passed program
 	program *p = &progs[prog - 1];
+	invalidateDrawLayout(p);
 
 	// Releasing both vertex and fragment programs from sceGxmShaderPatcher
 	if (p->status) {
@@ -2085,8 +2229,13 @@ void glGetProgramiv(GLuint progr, GLenum pname, GLint *params) {
 }
 
 void glLinkProgram(GLuint progr) {
+	if (cur_program == progr) {
+		dirty_frag_unifs = GL_TRUE;
+		dirty_vert_unifs = GL_TRUE;
+	}
 	// Grabbing passed program
 	program *p = &progs[progr - 1];
+	invalidateDrawLayout(p);
 
 	// vitaGL doesn't support re-linking of already linked programs.
 	// Early exit before any postponed GLSL work to avoid touching stale state.
@@ -2366,6 +2515,8 @@ void glLinkProgram(GLuint progr) {
 }
 
 void glUseProgram(GLuint prog) {
+	if (cur_program == prog)
+		return;
 	// Setting current custom program to passed program
 	cur_program = prog;
 	dirty_frag_unifs = GL_TRUE;
@@ -2472,6 +2623,31 @@ GLint glGetUniformLocation(GLuint prog, const GLchar *name) {
 	return -1;
 }
 
+/* Copy complete, non-array-indexed uniforms between linked specializations.
+ * Locations follow the same lifetime rules as glUniform calls. */
+GLboolean vglCopyUniform(GLint source, GLint destination) {
+	if (!source || source == -1 || !destination || destination == -1)
+		return GL_FALSE;
+	int source_offset = 0, destination_offset = 0;
+	uniform *src = (uniform *)getUniformFromPtr(source, &source_offset);
+	uniform *dst = (uniform *)getUniformFromPtr(destination, &destination_offset);
+	if (source_offset || destination_offset || src->size != dst->size)
+		return GL_FALSE;
+	if (src->size == 0 || src->size == 0xFFFFFFFF) {
+		dst->data = src->data;
+		/* Samplers are read directly when binding textures, outside the
+		 * uniform buffers; their stage flags are not initialized at link. */
+		return GL_TRUE;
+	} else {
+		if (!memcmp(src->data, dst->data, src->size * sizeof(float)))
+			return GL_TRUE;
+		memcpy(dst->data, src->data, src->size * sizeof(float));
+	}
+	if (dst->is_vertex) dirty_vert_unifs = GL_TRUE;
+	if (dst->is_fragment) dirty_frag_unifs = GL_TRUE;
+	return GL_TRUE;
+}
+
 inline void glUniform1i(GLint location, GLint v0) {
 	// Checking if the uniform does exist
 	if (location == -1 || location == 0)
@@ -2482,10 +2658,16 @@ inline void glUniform1i(GLint location, GLint v0) {
 	uniform *u = (uniform *)getUniformFromPtr(location, &offs);
 
 	// Setting passed value to desired uniform
-	if (u->size == 0 || u->size == 0xFFFFFFFF) // Sampler
+	if (u->size == 0 || u->size == 0xFFFFFFFF) { // Sampler
+		if (u->data == (float *)v0)
+			return;
 		u->data = (float *)v0;
-	else // Regular Uniform
-		u->data[offs] = (float)v0;
+	} else { // Regular Uniform
+		float value = (float)v0;
+		if (!memcmp(&u->data[offs], &value, sizeof(value)))
+			return;
+		u->data[offs] = value;
+	}
 
 	if (u->is_vertex)
 		dirty_vert_unifs = GL_TRUE;
@@ -2848,6 +3030,10 @@ inline void glUniform4f(GLint location, GLfloat v0, GLfloat v1, GLfloat v2, GLfl
 	int offs = 0;
 	uniform *u = (uniform *)getUniformFromPtr(location, &offs);
 
+	const GLfloat value[4] = {v0, v1, v2, v3};
+	if (!memcmp(&u->data[offs * 4], value, sizeof(value)))
+		return;
+
 	// Setting passed value to desired uniform
 	u->data[offs * 4] = v0;
 	u->data[offs * 4 + 1] = v1;
@@ -2879,6 +3065,8 @@ inline void glUniform4fv(GLint location, GLsizei count, const GLfloat *value) {
 		count = u->size / 4;
 	}
 #endif
+	if (count == 0 || !memcmp(&u->data[offs * 4], value, count * 4 * sizeof(float)))
+		return;
 	vgl_fast_memcpy(&u->data[offs * 4], value, count * 4 * sizeof(float));
 
 	if (u->is_vertex)
@@ -2971,6 +3159,8 @@ inline void glUniformMatrix4fv(GLint location, GLsizei count, GLboolean transpos
 		count = u->size / 16;
 	}
 #endif
+	if (count == 0 || (!transpose && !memcmp(&u->data[offs * 16], value, count * 16 * sizeof(float))))
+		return;
 	if (transpose) {
 		for (int i = 0; i < count; i++) {
 			matrix4x4_transpose(&u->data[(offs + i) * 16], &value[i * 16]);

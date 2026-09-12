@@ -68,61 +68,63 @@ static FILE *g_opened[PRELOAD_OPEN_MAX];
 static void  *g_slurp_data[PRELOAD_OPEN_MAX];
 static size_t g_slurp_size[PRELOAD_OPEN_MAX];
 static size_t g_slurp_pos[PRELOAD_OPEN_MAX];
+static int g_opened_end;
 
-static void track_add(FILE *fp) {
-    for (int i = 0; i < PRELOAD_OPEN_MAX; ++i) {
-        if (!g_opened[i]) {
-            g_opened[i] = fp;
-            g_slurp_data[i] = NULL;
-            g_slurp_size[i] = 0;
-            g_slurp_pos[i] = 0;
-            return;
-        }
-    }
-    l_warn("[PRELOAD] open-tracking full, fp=%p will route wrong", fp);
-}
-
-static void track_add_owned(FILE *fp, void *owned, size_t size) {
+static int track_add(FILE *fp, void *owned, size_t size) {
     for (int i = 0; i < PRELOAD_OPEN_MAX; ++i) {
         if (!g_opened[i]) {
             g_opened[i] = fp;
             g_slurp_data[i] = owned;
             g_slurp_size[i] = size;
             g_slurp_pos[i] = 0;
-            return;
+            if (g_opened_end <= i) g_opened_end = i + 1;
+            return 1;
         }
     }
-    l_warn("[PRELOAD] open-tracking full, fp=%p will route wrong (and leak %p)", fp, owned);
+    return 0;
 }
 
 static void track_remove(FILE *fp) {
-    for (int i = 0; i < PRELOAD_OPEN_MAX; ++i) {
+    for (int i = 0; i < g_opened_end; ++i) {
         if (g_opened[i] == fp) {
             if (g_slurp_data[i]) free(g_slurp_data[i]);
             g_opened[i] = NULL;
             g_slurp_data[i] = NULL;
             g_slurp_size[i] = 0;
             g_slurp_pos[i] = 0;
+            while (g_opened_end && !g_opened[g_opened_end - 1]) --g_opened_end;
             return;
         }
     }
 }
 
-static int slurp_slot_of(FILE *fp) {
+static int opened_slot_of(FILE *fp) {
     if (!fp) return -1;
-    for (int i = 0; i < PRELOAD_OPEN_MAX; ++i) {
-        if (g_opened[i] == fp && g_slurp_data[i]) return i;
+    for (int i = 0; i < g_opened_end; ++i) {
+        if (g_opened[i] == fp) return i;
     }
     return -1;
+}
+
+static int slurp_slot_of(FILE *fp) {
+    int i = opened_slot_of(fp);
+    return i >= 0 && g_slurp_data[i] ? i : -1;
 }
 
 int preloader_is_slurp(FILE *fp) {
     return slurp_slot_of(fp) >= 0;
 }
 
-size_t preloader_slurp_fast_read(FILE *fp, void *dst, size_t nbytes) {
+const unsigned char *preloader_slurp_take(FILE *fp, size_t nbytes) {
     int i = slurp_slot_of(fp);
-    if (i < 0) return 0;
+    if (i < 0 || nbytes > g_slurp_size[i] - g_slurp_pos[i])
+        return NULL;
+    const unsigned char *data = (const unsigned char *)g_slurp_data[i] + g_slurp_pos[i];
+    g_slurp_pos[i] += nbytes;
+    return data;
+}
+
+static size_t slurp_read(int i, void *dst, size_t nbytes) {
     size_t remaining = g_slurp_size[i] - g_slurp_pos[i];
     size_t copy = nbytes < remaining ? nbytes : remaining;
     if (copy > 0 && dst) {
@@ -130,6 +132,23 @@ size_t preloader_slurp_fast_read(FILE *fp, void *dst, size_t nbytes) {
         g_slurp_pos[i] += copy;
     }
     return copy;
+}
+
+int preloader_read(FILE *fp, void *dst, size_t size, size_t count, size_t *result) {
+    int i = opened_slot_of(fp);
+    if (i < 0) return 0;
+    if (!g_slurp_data[i]) {
+        *result = fread(dst, size, count, fp);
+        return 1;
+    }
+    size_t got = slurp_read(i, dst, size * count);
+    *result = size ? got / size : 0;
+    return 2;
+}
+
+size_t preloader_slurp_fast_read(FILE *fp, void *dst, size_t nbytes) {
+    int i = slurp_slot_of(fp);
+    return i < 0 ? 0 : slurp_read(i, dst, nbytes);
 }
 
 int preloader_slurp_fast_seek(FILE *fp, long offset, int whence) {
@@ -154,11 +173,7 @@ long preloader_slurp_fast_tell(FILE *fp) {
 }
 
 int preloader_is_preloaded(FILE *fp) {
-    if (!fp) return 0;
-    for (int i = 0; i < PRELOAD_OPEN_MAX; ++i) {
-        if (g_opened[i] == fp) return 1;
-    }
-    return 0;
+    return opened_slot_of(fp) >= 0;
 }
 
 void preloader_fclose_tracked(FILE *fp) {
@@ -308,7 +323,22 @@ FILE *preloader_slurp_adopt(void *buf, size_t size) {
         free(buf);
         return NULL;
     }
-    track_add_owned(fp, buf, size);
+    if (!track_add(fp, buf, size)) {
+        fclose(fp);
+        free(buf);
+        return NULL;
+    }
+    return fp;
+}
+
+FILE *preloader_open_memory(const void *buf, size_t size) {
+    if (!buf || !size)
+        return NULL;
+    FILE *fp = fmemopen((void *)buf, size, "rb");
+    if (fp && !track_add(fp, NULL, 0)) {
+        fclose(fp);
+        return NULL;
+    }
     return fp;
 }
 
@@ -326,9 +356,7 @@ FILE *preloader_try_open(const char *path) {
         }
         /* fmemopen returns a real newlib FILE*, so the caller (and any
          * library that bypasses our shims) can use it directly. */
-        FILE *fp = fmemopen(e->data, e->size, "rb");
-        if (fp) track_add(fp);
-        return fp;
+        return preloader_open_memory(e->data, e->size);
     }
     return NULL;
 }

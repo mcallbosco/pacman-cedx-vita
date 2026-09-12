@@ -27,12 +27,12 @@
 #include "utils/preloader.h"
 #include "utils/pgxt.h"
 #include "utils/text_patch.h"
+#include "utils/settings.h"
+#include "utils/ghost_eye_shadow_png.h"
 #include <psp2/kernel/processmgr.h>
 
-/* ===== Profiling counters (shared with java.c) =====
- * Counter storage always lives in java.c (~88 bytes BSS) so externally
- * visible symbols stay linkable; per-call increments and the expensive
- * bookkeeping are gated by ENABLE_IO_PROFILING below. */
+#ifdef ENABLE_IO_PROFILING
+/* Profiling counters are shared with java.c only in profiling builds. */
 extern uint64_t g_prof_open_count;
 extern uint64_t g_prof_open_us;
 extern uint64_t g_prof_read_count;
@@ -44,6 +44,7 @@ extern uint64_t g_prof_ogg_bytes;
 extern uint64_t g_prof_ogg_us;
 extern uint64_t g_prof_other_bytes;
 extern uint64_t g_prof_other_us;
+#endif
 
 static int prof_ends_with(const char *s, const char *ext) {
     if (!s || !ext) return 0;
@@ -196,6 +197,7 @@ static inline void prof_unregister_file(FILE *fp) { (void)fp; }
 // void stat_newlib_to_bionic(struct stat * src, stat64_bionic * dst);
 #include "reimpl/bits/_struct_converters.c"
 
+#ifdef ENABLE_AUDIO_LOGS
 #define BGM_TRACKED_FILES_MAX 64
 
 typedef struct {
@@ -282,6 +284,7 @@ static void bgm_track_close(FILE *fp, int fclose_ret) {
             t->seek_calls, t->path);
     memset(t, 0, sizeof(*t));
 }
+#endif
 
 /* ===== Negative directory cache =====
  *
@@ -441,6 +444,20 @@ FILE * fopen_soloader(const char * filename, const char * mode) {
     FILE *ret = NULL;
     int only_read = (mode && (mode[0] == 'r') && !strchr(mode, '+'));
 
+    /* Serve the eye glow from the executable, even when the data pack lacks
+     * it. The virtual path prevents sidecars from replacing embedded pixels. */
+    if (only_read && setting_ghostEyeTrails &&
+        !strcmp(filename, DATA_PATH "assets/data/tex/ghost_eye_shadow.png")) {
+        ret = preloader_open_memory(ghost_eye_shadow_png, sizeof(ghost_eye_shadow_png));
+#ifdef ENABLE_IO_PROFILING
+        g_prof_open_us += sceKernelGetProcessTimeWide() - _prof_t0;
+        g_prof_open_count++;
+#endif
+        prof_register_file(ret, filename);
+        pgxt_register_fopen_path(ret, "embedded:/ghost_eye_shadow.png");
+        return ret;
+    }
+
     /* Negative directory cache: short-circuit known-missing files before
      * we pay for a sceLibcBridge_fopen probe. Read-only paths only — write
      * opens create new files and must always go through to the real fopen. */
@@ -480,11 +497,13 @@ FILE * fopen_soloader(const char * filename, const char * mode) {
         pgxt_register_fopen_path(ret, filename);
     }
 
+#ifdef ENABLE_AUDIO_LOGS
     char final_bgm_path[512];
     final_bgm_path[0] = '\0';
     if (is_bgm_path(filename)) {
         snprintf(final_bgm_path, sizeof(final_bgm_path), "%s", filename);
     }
+#endif
 
     if (!ret && strstr(filename, "bgm5_ost_pac_man_ce_")) {
         char alias_path[512];
@@ -501,28 +520,33 @@ FILE * fopen_soloader(const char * filename, const char * mode) {
 #endif
             l_audio("[AUDIO][BGM] alias fopen(%s -> %s, %s): %p",
                     filename, alias_path, mode, ret);
+#ifdef ENABLE_AUDIO_LOGS
             if (ret && is_bgm_path(alias_path)) {
                 snprintf(final_bgm_path, sizeof(final_bgm_path), "%s", alias_path);
             }
+#endif
         }
     }
 
+#ifdef ENABLE_AUDIO_LOGS
     if (strstr(filename, "sound/bgm")) {
         l_audio("[AUDIO][BGM] fopen(%s, %s): %p", filename, mode, ret);
     }
+#endif
 
     if (ret)
         l_debug("fopen(%s, %s): %p", filename, mode, ret);
     else
         l_warn("fopen(%s, %s): %p", filename, mode, ret);
 
+#ifdef ENABLE_AUDIO_LOGS
     if (ret && final_bgm_path[0] != '\0') {
         bgm_track_open(ret, final_bgm_path);
     }
+#endif
 
-    /* .runnybin slurp: these files are read by the game in tight
-     * fread-per-glyph/animation-frame loops (menu.runnybin = 234k fread
-     * calls for 650 KB). Replace the real FILE* with an fmemopen'd buffer
+    /* Animation/text files are read in tight scalar-read loops.
+     * Replace the real FILE* with an fmemopen'd buffer
      * so those calls become memcpy instead of stdio. fmemopen returns a
      * newlib FILE*, so fread_soloader/fseek_soloader/fclose_soloader
      * already route correctly via preloader_is_preloaded(). */
@@ -603,16 +627,8 @@ size_t fread_soloader(void *ptr, size_t size, size_t nmemb, FILE *stream) {
     uint64_t _prof_t0 = sceKernelGetProcessTimeWide();
 #endif
     size_t ret;
-    if (preloader_is_slurp(stream)) {
-        /* Slurp handle — skip newlib entirely and memcpy from our buffer. */
-        size_t req = size * nmemb;
-        size_t got = preloader_slurp_fast_read(stream, ptr, req);
-        ret = (size > 0) ? (got / size) : 0;
-    } else if (preloader_is_preloaded(stream)) {
-        /* fmemopen'd newlib FILE* that we don't own (preloader cache);
-         * must use newlib fread to honor the __sFILE layout. */
-        ret = fread(ptr, size, nmemb, stream);
-    } else {
+    int buffered = preloader_read(stream, ptr, size, nmemb, &ret);
+    if (!buffered) {
 #ifdef USE_SCELIBC_IO
         ret = sceLibcBridge_fread(ptr, size, nmemb, stream);
 #else
@@ -623,7 +639,7 @@ size_t fread_soloader(void *ptr, size_t size, size_t nmemb, FILE *stream) {
      * derive the source path. Whole-file reads (size=1, nmemb=filesize) are
      * typical; partial reads also register and will simply not match if the
      * game later passes a different buffer to LoadFromMem. */
-    if (ret > 0) {
+    if (ret > 0 && buffered != 2) {
         pgxt_register_fread(stream, ptr, size * ret);
     }
 #ifdef ENABLE_IO_PROFILING
@@ -642,6 +658,21 @@ size_t fread_soloader(void *ptr, size_t size, size_t nmemb, FILE *stream) {
     {
         size_t req = size * nmemb;
         size_t got_bgm = size * ret;
+        if (ret < nmemb && bgm_track_find(stream)) {
+            int at_end, error;
+#ifdef USE_SCELIBC_IO
+            if (!buffered) {
+                at_end = sceLibcBridge_feof(stream);
+                error = sceLibcBridge_ferror(stream);
+            } else
+#endif
+            {
+                at_end = feof(stream);
+                error = ferror(stream);
+            }
+            l_audio("[AUDIO][BGM] short-read fp=%p requested=%zu got=%zu eof=%d error=%d",
+                    stream, req, got_bgm, at_end, error);
+        }
         bgm_track_read(stream, req, got_bgm);
     }
 #endif
@@ -661,7 +692,9 @@ int fseek_soloader(FILE *stream, long offset, int whence) {
         ret = fseek(stream, offset, whence);
 #endif
     }
+#ifdef ENABLE_AUDIO_LOGS
     bgm_track_seek(stream, offset, whence, ret);
+#endif
     return ret;
 }
 
@@ -677,6 +710,22 @@ long ftell_soloader(FILE *stream) {
 #else
     return ftell(stream);
 #endif
+}
+
+/* ARM32 Bionic uses a four-byte file position. FileStream::Size saves and
+ * restores it around a seek to EOF, including for embedded PNG streams.
+ * Route through the same tracked newlib/slurp/bridge path as seek and tell;
+ * passing a memory FILE directly to sceLibcBridge reads the wrong layout. */
+int fgetpos_soloader(FILE *stream, int32_t *position) {
+    long offset = ftell_soloader(stream);
+    if (offset < 0)
+        return -1;
+    *position = (int32_t)offset;
+    return 0;
+}
+
+int fsetpos_soloader(FILE *stream, const int32_t *position) {
+    return fseek_soloader(stream, *position, SEEK_SET);
 }
 
 int open_soloader(const char * path, int oflag, ...) {
@@ -750,7 +799,9 @@ int fclose_soloader(FILE * f) {
         ret = fclose(f);
 #endif
     }
+#ifdef ENABLE_AUDIO_LOGS
     bgm_track_close(f, ret);
+#endif
     l_debug("fclose(%p): %i", f, ret);
     return ret;
 }

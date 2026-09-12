@@ -4,5 +4,9 @@
 #include <stddef.h>
 
 int pmcedx_patch_text_asset(const char *path, void *data, size_t len);
+/* samples: 0 disables offset sampling; 2/4/8 select blur quality. */
+int pmcedx_patch_motion_blur_shader(char *source, int samples);
+char *pmcedx_optimize_map_shader(const char *source);
+char *pmcedx_single_texture_map_shader(const char *source);
 
 #endif

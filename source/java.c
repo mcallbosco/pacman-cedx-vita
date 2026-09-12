@@ -57,6 +57,7 @@ typedef struct {
 /* Global state for field access (FalsoJNI fields are global, not per-object) */
 static VitaAPKFile *g_current_apk_file = NULL;
 
+#ifdef ENABLE_IO_PROFILING
 /* ===== Load-time profiling counters =====
  * These aggregate file I/O statistics so we can figure out what
  * actually dominates startup time (PNGs, data files, etc.). */
@@ -93,6 +94,7 @@ static int prof_is_ext(const char *name, const char *ext) {
 
 /* Category tracked per open file for read accounting */
 static int g_prof_current_cat = 0; /* 0=other, 1=png, 2=ogg */
+#endif
 
 /*
  * FileHelper reimplementation
@@ -264,19 +266,23 @@ static jobject apk_openFileAndroid(jmethodID id, va_list args) {
     char path[512];
     snprintf(path, sizeof(path), "%sassets/%s", DATA_PATH, filename);
 
+#ifdef ENABLE_IO_PROFILING
     uint64_t _prof_t0 = prof_now_us();
+#endif
     FILE *fp = fopen(path, "rb");
     if (!fp) {
         /* Try without assets/ prefix */
         snprintf(path, sizeof(path), "%s%s", DATA_PATH, filename);
         fp = fopen(path, "rb");
     }
+#ifdef ENABLE_IO_PROFILING
     g_prof_open_us += prof_now_us() - _prof_t0;
     g_prof_open_count++;
     /* Classify the file by extension for the breakdown */
     if (prof_is_ext(filename, ".png")) g_prof_current_cat = 1;
     else if (prof_is_ext(filename, ".ogg") || prof_is_ext(filename, ".mp3")) g_prof_current_cat = 2;
     else g_prof_current_cat = 0;
+#endif
     if (!fp) {
         l_error("openFileAndroid: cannot open '%s'", filename);
         (*(&jni))->ReleaseStringUTFChars(&jni, filenameStr, filename);
@@ -349,9 +355,13 @@ static void apk_readFileAndroid(jmethodID id, va_list args) {
         apk->bufferSize = numBytes;
     }
 
+#ifdef ENABLE_IO_PROFILING
     uint64_t _prof_rt0 = prof_now_us();
+#endif
     int bytesRead = (int)fread(apk->data->array, 1, numBytes, apk->fp);
+#ifdef ENABLE_IO_PROFILING
     uint64_t _prof_rdt = prof_now_us() - _prof_rt0;
+#endif
     if (bytesRead > 0) {
         int text_patches = pmcedx_patch_text_asset(apk->name, apk->data->array, (size_t)bytesRead);
         if (text_patches > 0) {
@@ -359,6 +369,7 @@ static void apk_readFileAndroid(jmethodID id, va_list args) {
         }
     }
     apk->position += bytesRead;
+#ifdef ENABLE_IO_PROFILING
     g_prof_read_count++;
     g_prof_read_bytes += (uint64_t)bytesRead;
     g_prof_read_us    += _prof_rdt;
@@ -372,6 +383,7 @@ static void apk_readFileAndroid(jmethodID id, va_list args) {
         g_prof_other_bytes += (uint64_t)bytesRead;
         g_prof_other_us    += _prof_rdt;
     }
+#endif
 
     /* Update FalsoJNI fields immediately so native can read data */
     g_current_apk_file = apk;
@@ -511,24 +523,35 @@ static void fh_writeFileToSD(jmethodID id, va_list args) {
     fjni_log_dbg("writeFileToSD: stubbed");
 }
 
-static jint fh_GetLanguageID(jmethodID id, va_list args) {
+static int game_language(void) {
+    int language = settings_sanitize_language(setting_language);
+    if (language != SETTING_LANGUAGE_SYSTEM)
+        return language;
+
     int lang = -1;
-    sceAppUtilSystemParamGetInt(SCE_SYSTEM_PARAM_ID_LANG, &lang);
-    /* Map Vita language IDs to game's expected IDs.
-     * The game uses -1 for auto-detect, which should work fine. */
+    if (sceAppUtilSystemParamGetInt(SCE_SYSTEM_PARAM_ID_LANG, &lang) < 0)
+        return SETTING_LANGUAGE_ENGLISH;
     switch (lang) {
-        case SCE_SYSTEM_PARAM_LANG_JAPANESE:  return 0;
+        case SCE_SYSTEM_PARAM_LANG_JAPANESE:  return SETTING_LANGUAGE_JAPANESE;
         case SCE_SYSTEM_PARAM_LANG_ENGLISH_US:
-        case SCE_SYSTEM_PARAM_LANG_ENGLISH_GB: return 1;
-        case SCE_SYSTEM_PARAM_LANG_FRENCH:    return 2;
-        case SCE_SYSTEM_PARAM_LANG_SPANISH:   return 3;
-        case SCE_SYSTEM_PARAM_LANG_GERMAN:    return 4;
-        case SCE_SYSTEM_PARAM_LANG_ITALIAN:   return 5;
-        case SCE_SYSTEM_PARAM_LANG_KOREAN:    return 6;
-        case SCE_SYSTEM_PARAM_LANG_CHINESE_T: return 7;
-        case SCE_SYSTEM_PARAM_LANG_CHINESE_S: return 8;
-        default: return 1; /* English */
+        case SCE_SYSTEM_PARAM_LANG_ENGLISH_GB: return SETTING_LANGUAGE_ENGLISH;
+        case SCE_SYSTEM_PARAM_LANG_FRENCH:    return SETTING_LANGUAGE_FRENCH;
+        case SCE_SYSTEM_PARAM_LANG_SPANISH:   return SETTING_LANGUAGE_SPANISH;
+        case SCE_SYSTEM_PARAM_LANG_GERMAN:    return SETTING_LANGUAGE_GERMAN;
+        case SCE_SYSTEM_PARAM_LANG_ITALIAN:   return SETTING_LANGUAGE_ITALIAN;
+        case SCE_SYSTEM_PARAM_LANG_RUSSIAN:   return SETTING_LANGUAGE_RUSSIAN;
+        case SCE_SYSTEM_PARAM_LANG_KOREAN:    return SETTING_LANGUAGE_KOREAN;
+        /* The supplied pack has Simplified Chinese and Brazilian Portuguese. */
+        case SCE_SYSTEM_PARAM_LANG_CHINESE_T:
+        case SCE_SYSTEM_PARAM_LANG_CHINESE_S: return SETTING_LANGUAGE_CHINESE;
+        case SCE_SYSTEM_PARAM_LANG_PORTUGUESE_PT:
+        case SCE_SYSTEM_PARAM_LANG_PORTUGUESE_BR: return SETTING_LANGUAGE_PORTUGUESE;
+        default: return SETTING_LANGUAGE_ENGLISH;
     }
+}
+
+static jint fh_GetLanguageID(jmethodID id, va_list args) {
+    return game_language();
 }
 
 static jint fh_GetDate_Year(jmethodID id, va_list args)  { return 2026; }
@@ -540,7 +563,7 @@ static jboolean fh_IsTrial(jmethodID id, va_list args) {
 }
 
 static jboolean fh_AccessEveryMission(jmethodID id, va_list args) {
-    return setting_accessAllMissions ? JNI_TRUE : JNI_FALSE;
+    return setting_unlockAllContent ? JNI_TRUE : JNI_FALSE;
 }
 
 /* --- RateMeManager --- */
@@ -561,7 +584,10 @@ static jboolean hasLowPerformance(jmethodID id, va_list args) {
 }
 
 static jobject getLanguage(jmethodID id, va_list args) {
-    return (jobject)(*(&jni))->NewStringUTF(&jni, "en");
+    static const char *const codes[SETTING_LANGUAGE_COUNT] = {
+        "ja", "en", "fr", "it", "de", "es", "ru", "zh", "ko", "pt"
+    };
+    return (jobject)(*(&jni))->NewStringUTF(&jni, codes[game_language()]);
 }
 
 static void keepScreenOn(jmethodID id, va_list args) {

@@ -120,9 +120,11 @@ static uint32_t vertex_data_pool_size = CIRCULAR_VERTEX_POOL_SIZE_DEF;
 uint8_t *vgl_reserve_data_pool(uint32_t size) {
 #ifdef HAVE_FAILSAFE_CIRCULAR_VERTEX_POOL
 	uint8_t *res = vertex_data_pool_ptr[vgl_circular_idx];
-	vertex_data_pool_ptr[vgl_circular_idx] += size;
-	if (vertex_data_pool_ptr[vgl_circular_idx] > vertex_data_pool_limit[vgl_circular_idx]) {
-		vgl_log("%s:%d Circular vertex pool overrun (Total of %u bytes). Consider increasing its size with vglSetVertexPoolSize. Falling back to regular allocation.\n", __FILE__, __LINE__, vertex_data_pool_ptr[vgl_circular_idx] - vertex_data_pool_limit[vgl_circular_idx]);
+	size_t aligned_size = VGL_ALIGN(size, MEM_ALIGNMENT);
+	if (res && aligned_size >= size && aligned_size <= (size_t)(vertex_data_pool_limit[vgl_circular_idx] - res)) {
+		vertex_data_pool_ptr[vgl_circular_idx] += aligned_size;
+	} else {
+		vgl_log("%s:%d Circular vertex pool unavailable for %u bytes. Falling back to regular allocation.\n", __FILE__, __LINE__, size);
 		res = (uint8_t *)gpu_alloc_mapped(size, VGL_MEM_MAIN);
 #ifdef LOG_ERRORS
 		if (!res)
@@ -386,7 +388,7 @@ GLboolean vglInitWithCustomSizes(int pool_size, int width, int height, int ram_p
 	for (int i = 0; i < gxm_display_buffer_count; i++) {
 		vertex_data_pool[i] = gpu_alloc_mapped(vertex_data_pool_size / gxm_display_buffer_count, VGL_MEM_RAM);
 		vertex_data_pool_ptr[i] = vertex_data_pool[i];
-		vertex_data_pool_limit[i] = (uint8_t *)vertex_data_pool[i] + vertex_data_pool_size / gxm_display_buffer_count;
+		vertex_data_pool_limit[i] = vertex_data_pool[i] ? vertex_data_pool[i] + vertex_data_pool_size / gxm_display_buffer_count : NULL;
 	}
 #elif defined(HAVE_CIRCULAR_VERTEX_POOL)
 	vertex_data_pool = gpu_alloc_mapped(vertex_data_pool_size, VGL_MEM_RAM);

@@ -17,17 +17,8 @@
 #include <psp2/io/fcntl.h>
 
 #include "utils/dialog.h"
+#include "utils/logger.h"
 #include "so_util.h"
-
-/* Write unresolved import messages to debug log file for FTP retrieval */
-static void log_to_file(const char *msg) {
-    SceUID fd = sceIoOpen(WRITABLE_PATH "debug.log",
-                          SCE_O_WRONLY | SCE_O_CREAT | SCE_O_APPEND, 0777);
-    if (fd >= 0) {
-        sceIoWrite(fd, msg, sceClibStrnlen(msg, 512));
-        sceIoClose(fd);
-    }
-}
 
 #ifndef SCE_KERNEL_MEMBLOCK_TYPE_USER_RX
 #define SCE_KERNEL_MEMBLOCK_TYPE_USER_RX                 (0x0C20D050)
@@ -74,7 +65,7 @@ static so_module *head = NULL, *tail = NULL;
 so_hook hook_thumb(uintptr_t addr, uintptr_t dst) {
     so_hook h;
     memset(&h, 0, sizeof(h));
-    sceClibPrintf("THUMB HOOK\n");
+    l_debug("THUMB HOOK");
     if (addr == 0)
         return h;
     h.thumb_addr = addr;
@@ -85,7 +76,7 @@ so_hook hook_thumb(uintptr_t addr, uintptr_t dst) {
         h.thumb_unaligned = 1;
         kuKernelCpuUnrestrictedMemcpy((void *)addr, &nop, sizeof(nop));
         addr += 2;
-        sceClibPrintf("THUMB UNALIGNED\n");
+        l_debug("THUMB UNALIGNED");
     }
 
     h.addr = addr;
@@ -100,7 +91,7 @@ so_hook hook_thumb(uintptr_t addr, uintptr_t dst) {
 so_hook hook_arm(uintptr_t addr, uintptr_t dst) {
     so_hook h;
     memset(&h, 0, sizeof(h));
-    sceClibPrintf("ARM HOOK\n");
+    l_debug("ARM HOOK");
     if (addr == 0)
         return h;
     h.thumb_addr = 0;
@@ -188,7 +179,7 @@ int _so_load(so_module *mod, SceUID so_blockid, void *so_data, uintptr_t load_ad
                 mod->cave_base = mod->cave_head = (uintptr_t) prog_data + mod->phdr[i].p_memsz;
                 mod->cave_base = ALIGN_MEM(mod->cave_base, 0x4);
                 mod->cave_head = mod->cave_base;
-                sceClibPrintf("code cave: %d bytes (@0x%08X).\n", mod->cave_size, mod->cave_base);
+                l_debug("code cave: %d bytes (@0x%08X).", mod->cave_size, mod->cave_base);
 
                 data_addr = (uintptr_t)prog_data + prog_size;
             } else {
@@ -483,7 +474,7 @@ int so_resolve(so_module *mod, so_default_dynlib *default_dynlib, int size_defau
                     if (!default_dynlib_only) {
                         uintptr_t link = so_resolve_link(mod, mod->dynstr + sym->st_name);
                         if (link) {
-                            sceClibPrintf("Resolved from dependencies: %s\n", mod->dynstr + sym->st_name);
+                            l_debug("Resolved from dependencies: %s", mod->dynstr + sym->st_name);
                             if (type == R_ARM_ABS32) {
                                 val = *ptr + link;
                                 kuKernelCpuUnrestrictedMemcpy(ptr, &val, sizeof(uintptr_t));
@@ -504,10 +495,7 @@ int so_resolve(so_module *mod, so_default_dynlib *default_dynlib, int size_defau
                     }
 
                     if (!resolved) {
-                        char buf[256];
-                        sceClibSnprintf(buf, sizeof(buf), "Unresolved import: %s\n", mod->dynstr + sym->st_name);
-                        sceClibPrintf("%s", buf);
-                        log_to_file(buf);
+                        l_error("Unresolved import: %s", mod->dynstr + sym->st_name);
                         if (type == R_ARM_JUMP_SLOT) {
                             *ptr = (uintptr_t)&plt0_stub;
                         }
@@ -698,7 +686,7 @@ void so_symbol_fix_ldmia(so_module *mod, const char *symbol) {
 
         //Is this an LDMIA instruction with a R0-R12 base register?
         if (((inst & 0xFFF00000) == 0xE8900000) && (((inst >> 16) & 0xF) < 13) ) {
-            sceClibPrintf("Found possibly misaligned LDMIA on 0x%08X, trying to fix it... (instr: 0x%08X, to 0x%08X)\n", addr, *(uint32_t*)addr, mod->patch_head);
+            l_debug("Found possibly misaligned LDMIA on 0x%08X, trying to fix it... (instr: 0x%08X, to 0x%08X)", addr, *(uint32_t*)addr, mod->patch_head);
             trampoline_ldm(mod, (uint32_t *) addr);
         }
     }

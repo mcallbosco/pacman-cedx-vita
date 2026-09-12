@@ -27,11 +27,16 @@ void gl_preload();
 
 void gl_swap();
 
+GLboolean gl_batch_can_index(GLsizei stride);
+void gl_draw_indexed_batch(GLuint index_buffer, GLsizei vertices);
+void gl_draw_direct_grid(const void *buffer, unsigned vertices, unsigned stride);
+
 void glCompileShader_soloader(GLuint shader);
 
 void glLinkProgram_soloader(GLuint program);
 
 GLuint glCreateProgram_soloader(void);
+void glDeleteProgram_soloader(GLuint program);
 
 GLuint glCreateShader_soloader(GLenum type);
 

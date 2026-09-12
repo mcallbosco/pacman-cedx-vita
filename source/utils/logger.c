@@ -14,9 +14,6 @@
 #include <stdbool.h>
 #include <stdatomic.h>
 
-#define LOG_FILE_PATH WRITABLE_PATH "debug.log"
-static SceUID _log_fd = -1;
-
 #define COLOR_RED    "\x1B[38;5;196m"
 #define COLOR_PINK   "\x1B[38;5;212m"
 #define COLOR_ORANGE "\x1B[38;5;202m"
@@ -33,6 +30,63 @@ static atomic_bool _log_mutex_ready = ATOMIC_VAR_INIT(false);
 static char buffer_a[2048];
 // Buffer B is used to compile the final log using the updated format string.
 static char buffer_b[2048];
+
+#ifdef SOLOADER_FILE_LOGGING
+#define LOG_FILE_PATH WRITABLE_PATH "debug.log"
+static SceUID _log_fd = -1;
+static char _log_recovery[128];
+static unsigned int _log_recovery_length;
+static unsigned int _log_recovery_written;
+
+static void close_log_file(void) {
+    sceIoClose(_log_fd);
+    _log_fd = -1;
+}
+
+/* A suspended app can lose its open file handles. Retry only the unwritten
+ * bytes once, then leave the descriptor closed for the next log entry. */
+static bool write_log_bytes(const char *data, unsigned int length,
+                            unsigned int *written) {
+    if (_log_fd < 0) {
+        _log_fd = sceIoOpen(LOG_FILE_PATH,
+                            SCE_O_WRONLY | SCE_O_CREAT | SCE_O_APPEND, 0777);
+    }
+    if (_log_fd < 0) return false;
+
+    unsigned int remaining = length - *written;
+    int ret = sceIoWrite(_log_fd, data + *written, remaining);
+    if (ret == (int)remaining) return true;
+
+    if (!_log_recovery_length) {
+        _log_recovery_length = sceClibSnprintf(_log_recovery,
+                sizeof(_log_recovery),
+                "\n[LOGGER] write recovery result=0x%08x requested=%u\n",
+                ret, remaining);
+        _log_recovery_written = 0;
+    }
+    if (ret > 0) *written += ret;
+    close_log_file();
+    _log_fd = sceIoOpen(LOG_FILE_PATH,
+                        SCE_O_WRONLY | SCE_O_CREAT | SCE_O_APPEND, 0777);
+    if (_log_fd < 0) return false;
+
+    remaining = length - *written;
+    ret = sceIoWrite(_log_fd, data + *written, remaining);
+    if (ret == (int)remaining) return true;
+    if (ret > 0) *written += ret;
+    close_log_file();
+    return false;
+}
+
+static bool flush_log_recovery(void) {
+    if (!_log_recovery_length) return true;
+    if (!write_log_bytes(_log_recovery, _log_recovery_length,
+                         &_log_recovery_written)) return false;
+    _log_recovery_length = 0;
+    _log_recovery_written = 0;
+    return true;
+}
+#endif
 
 void _log_print(int t, const char* fmt, ...) {
     if (!atomic_load_explicit(&_log_mutex_ready, memory_order_relaxed)) {
@@ -78,17 +132,18 @@ void _log_print(int t, const char* fmt, ...) {
     va_start(list, fmt);
     sceClibVsnprintf(buffer_b, sizeof(buffer_b), buffer_a, list);
     va_end(list);
-    sceClibPrintf(buffer_b);
+    sceClibPrintf("%s", buffer_b);
 
-    /* Also write to file so we can retrieve via FTP on real hardware */
-    if (_log_fd < 0) {
-        _log_fd = sceIoOpen(LOG_FILE_PATH,
-                            SCE_O_WRONLY | SCE_O_CREAT | SCE_O_APPEND, 0777);
+#ifdef SOLOADER_FILE_LOGGING
+    /* Finish a pending recovery marker before appending the next entry. */
+    if (flush_log_recovery()) {
+        unsigned int written = 0;
+        if (write_log_bytes(buffer_b, sceClibStrnlen(buffer_b, sizeof(buffer_b)),
+                            &written)) {
+            flush_log_recovery();
+        }
     }
-    if (_log_fd >= 0) {
-        /* Write without ANSI color codes — find the plain text after color sequences */
-        sceIoWrite(_log_fd, buffer_b, sceClibStrnlen(buffer_b, sizeof(buffer_b)));
-    }
+#endif
 
     if (atomic_load_explicit(&_log_mutex_ready, memory_order_relaxed)) {
         sceKernelUnlockLwMutex(&_log_mutex, 1);

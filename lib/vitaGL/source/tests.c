@@ -37,6 +37,11 @@ SceGxmFragmentProgram *scissor_test_fragment_program; // Scissor test fragment p
 vector4f *scissor_test_vertices = NULL; // Scissor test region vertices
 SceUID scissor_test_vertices_uid; // Scissor test vertices memblock id
 GLboolean skip_scene_reset = GL_FALSE;
+static GLboolean scissor_mask_valid = GL_FALSE;
+static GLboolean scissor_mask_enabled;
+static scissor_region scissor_mask_region;
+static framebuffer *scissor_mask_framebuffer;
+static uint32_t scissor_mask_width, scissor_mask_height;
 
 // Stencil Test
 uint8_t stencil_mask_front = 0xFF; // Current in use mask for stencil test on front
@@ -252,7 +257,23 @@ inline __attribute__((always_inline)) void update_alpha_test_settings() {
 		alpha_op = ALWAYS;
 }
 
+void invalidate_scissor_mask(void) {
+	scissor_mask_valid = GL_FALSE;
+}
+
 void update_scissor_test() {
+	framebuffer *target = is_rendering_display ? NULL : in_use_framebuffer;
+	uint32_t width = target ? target->width : DISPLAY_WIDTH;
+	uint32_t height = target ? target->height : DISPLAY_HEIGHT;
+	// Only reuse a mask established in this scene, including the tile clip.
+	// gl_y also affects the tile clip for flipped framebuffer rendering.
+	if (scissor_mask_valid && scissor_mask_enabled == scissor_test_state &&
+		scissor_mask_framebuffer == target && scissor_mask_width == width &&
+		scissor_mask_height == height && scissor_mask_region.x == region.x &&
+		scissor_mask_region.y == region.y && scissor_mask_region.w == region.w &&
+		scissor_mask_region.h == region.h && scissor_mask_region.gl_y == region.gl_y)
+		return;
+
 	const float scissor_depth = 1.0f;
 
 	// Setting current vertex program to clear screen one and fragment program to scissor test one
@@ -342,9 +363,19 @@ void update_scissor_test() {
 	refresh_stencil_settings();
 
 	vglRestoreVertexUniformBuffer();
+
+	scissor_mask_enabled = scissor_test_state;
+	scissor_mask_framebuffer = target;
+	scissor_mask_width = width;
+	scissor_mask_height = height;
+	scissor_mask_region = region;
+	// sceneReset can overwrite tile clipping after its recursive glScissor.
+	// Let the next normal update establish the reusable mask and clip together.
+	scissor_mask_valid = !skip_scene_reset;
 }
 
 void resetScissorTestRegion(void) {
+	invalidate_scissor_mask();
 	// Setting scissor test region to default values
 	region.x = region.y = region.gl_x = region.gl_y = 0;
 	region.w = region.gl_w = DISPLAY_WIDTH;

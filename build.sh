@@ -8,7 +8,17 @@ if [[ -z "${VITASDK:-}" ]]; then
     exit 1
 fi
 
-cmake -B build -S . "$@"
+# Start with a quiet Release build even after an earlier diagnostic build.
+# Explicit command-line options may still enable the requested diagnostics.
+cmake -B build -S . \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DENABLE_RUNTIME_LOGS=OFF \
+    -DENABLE_GL_DEBUG_HOOKS=OFF \
+    -DENABLE_FALSOJNI_VERBOSE=OFF \
+    -DENABLE_AUDIO_LOGS=OFF \
+    -DENABLE_IO_PROFILING=OFF \
+    -DDUMP_COMPILED_SHADERS=OFF \
+    "$@"
 cmake --build build -j"$(nproc)"
 
 echo

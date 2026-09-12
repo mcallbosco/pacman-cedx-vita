@@ -19,7 +19,7 @@ include("${VITASDK}/share/vita.cmake" REQUIRED)
 set(VITA_APP_NAME "PAC-MAN CE DX")
 set(VITA_TITLEID "PCMN00001")
 set(VITA_VPKNAME "pacmancedx")
-set(VITA_VERSION "02.00")
+set(VITA_VERSION "03.00")
 set(VITA_MKSFOEX_FLAGS "-d ATTRIBUTE2=12")
 
 set(VITA_LIVEAREA_DISPLAY_VERSION "${VITA_VERSION}")
@@ -125,6 +125,8 @@ endif()
 
 if (ENABLE_FALSOJNI_VERBOSE)
   add_definitions(-DFALSOJNI_DEBUGLEVEL=0)
+else()
+  add_definitions(-DFALSOJNI_DEBUGLEVEL=4)
 endif()
 
 if (ENABLE_AUDIO_LOGS)
@@ -173,6 +175,48 @@ add_executable(${CMAKE_PROJECT_NAME}
                source/reimpl/asset_manager.cpp
                source/utils/dialog.c
                source/utils/glutil.c
+               source/utils/game_perf.c
+               source/utils/game_rules.c
+               source/utils/game_rules_data.c
+               source/utils/game_speed.c
+               source/utils/game_audio.c
+               source/utils/game_music_io.c
+               source/utils/game_math.c
+               source/utils/game_shader.c
+               source/utils/game_loading.c
+               source/utils/game_maze_preload.c
+               source/utils/game_png.c
+               source/utils/game_spacing.c
+               source/utils/game_ghost_scan.c
+               source/utils/game_transform.c
+               source/utils/game_tasks.c
+               source/utils/game_primitive.c
+               source/utils/game_area.c
+               source/utils/game_grid.c
+               source/utils/game_map_draw.c
+               source/utils/game_sprite_draw.c
+               source/utils/game_viewport.c
+               source/utils/game_fade.c
+               source/utils/game_navigation.c
+               source/utils/game_map_shader.c
+               source/utils/game_map_color.c
+               source/utils/game_texture.c
+               source/utils/game_vertex.c
+               source/utils/game_batch.c
+               source/utils/game_profile.c
+               source/utils/game_wave.c
+               source/utils/game_wobble.c
+               source/utils/game_ghost_particles.c
+               source/utils/game_ghost_eat.c
+               source/utils/game_eye_trails.c
+               source/utils/game_chain_trail.c
+               source/utils/game_afterimages.c
+               source/utils/game_int_vector.c
+               source/utils/game_map_effects.c
+               source/utils/game_danger_zoom.c
+               source/utils/game_resolution.c
+               source/utils/game_frame_rate.c
+               source/utils/game_frame.c
                source/utils/init.c
                source/utils/logger.c
                source/utils/pgxt.c
@@ -193,16 +237,19 @@ add_executable(${CMAKE_PROJECT_NAME}
 # ---------------------------------------------------------------------------
 set(VITAGL_DIR "${CMAKE_SOURCE_DIR}/lib/vitaGL")
 set(VITAGL_LIB "${VITAGL_DIR}/libvitaGL.a")
+file(GLOB_RECURSE VITAGL_SOURCE_FILES CONFIGURE_DEPENDS "${VITAGL_DIR}/source/*.c" "${VITAGL_DIR}/source/*.h")
 
 # Build flags matching what the port needs
 set(VITAGL_MAKE_FLAGS
     HAVE_GLSL_SUPPORT=1
     HAVE_SHADER_CACHE=1
     SOFTFP_ABI=1
+    CIRCULAR_VERTEX_POOL=2
 )
 
 add_custom_command(
     OUTPUT ${VITAGL_LIB}
+    DEPENDS ${VITAGL_SOURCE_FILES} "${VITAGL_DIR}/Makefile"
     COMMAND make -j$$(nproc) ${VITAGL_MAKE_FLAGS}
     WORKING_DIRECTORY ${VITAGL_DIR}
     COMMENT "Building vitaGL from source (GLSL + softfp)"
@@ -292,7 +339,7 @@ add_dependencies(vitaGL_clean_lib vitaGL_clean_build)
 # Configurator - standalone settings app launched from LiveArea (imgui)
 # The configurator does NOT load Android .so files, so it uses the standard
 # hardfp ABI to match the SDK's pre-built imgui and system libraries.
-add_executable(configurator source/configurator.cpp)
+add_executable(configurator source/configurator.cpp source/utils/settings.c)
 target_compile_options(configurator PRIVATE -mfloat-abi=hard)
 target_link_libraries(configurator
                       vita2d
